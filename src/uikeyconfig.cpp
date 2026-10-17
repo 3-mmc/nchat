@@ -244,6 +244,19 @@ void UiKeyConfig::Init(bool p_MapKeys)
     { "cycle_list_view", "\\33\\146" }, // alt/opt-f
     { "toggle_pinned_only", "\\33\\157" }, // alt/opt-o
     { "play_audio", "KEY_NONE" },
+    { "tab_1", "\\33\\61" }, // alt/opt-1
+    { "tab_2", "\\33\\62" },
+    { "tab_3", "\\33\\63" },
+    { "tab_4", "\\33\\64" },
+    { "tab_5", "\\33\\65" },
+    { "tab_6", "\\33\\66" },
+    { "tab_7", "\\33\\67" },
+    { "tab_8", "\\33\\70" },
+    { "tab_9", "\\33\\71" },
+    { "toggle_tab", "\\33\\60" }, // alt/opt-0
+    { "toggle_split", "\\33\\166" }, // alt/opt-v
+    { "swap_split", "\\33\\170" }, // alt/opt-x
+    { "preferences", "\\33\\147" }, // alt/opt-g
     { "open", "KEY_CTRLV" },
     { "open_link", "KEY_CTRLW" },
     { "open_msg", "\\33\\167" }, // alt/opt-w
@@ -260,7 +273,7 @@ void UiKeyConfig::Init(bool p_MapKeys)
     { "terminal_focus_out", "KEY_FOCUS_OUT" },
     { "terminal_resize", "KEY_RESIZE" },
     { "auto_compose", "\\33\\151" }, // alt/opt-i
-    { "select_mention", "\\33\\62" }, // alt/opt-2
+    { "select_mention", "\\33\\155" }, // alt/opt-m (alt-2 switches to tab 2)
     { "tab", "\\33\\11" }, // alt/opt-tab
   };
 

@@ -19,6 +19,7 @@
 #include "uistatusview.h"
 #include "uitopview.h"
 #include "uiviewbase.h"
+#include "uimodel.h"
 
 UiView::UiView(UiModel* p_UiModel)
   : m_UiModel(p_UiModel)
@@ -107,8 +108,27 @@ void UiView::Init()
     int h = m_UiScreen->H() - m_UiTopView->H() - m_UiHelpView->H() -
       m_UiEntryView->H() - m_UiStatusView->H();
     int y = m_UiTopView->H();
-    UiViewParams params(x, y, w, h, m_HistoryEnabled, m_UiModel);
-    m_UiHistoryView = std::make_shared<UiHistoryView>(params);
+
+    // split view: current chat left, docked chat right, separated by a border
+    const bool splitEnabled = m_UiModel->GetSplitEnabledLocked() && (w >= 41);
+    if (splitEnabled)
+    {
+      const int mainW = (w - 1) / 2;
+      const int splitW = w - mainW - 1;
+      UiViewParams mainParams(x, y, mainW, h, m_HistoryEnabled, m_UiModel);
+      m_UiHistoryView = std::make_shared<UiHistoryView>(mainParams, UiHistoryView::PaneMain);
+      UiViewParams borderParams(x + mainW, y, 1, h, true, m_UiModel);
+      m_UiSplitBorderView = std::make_shared<UiListBorderView>(borderParams);
+      UiViewParams splitParams(x + mainW + 1, y, splitW, h, m_HistoryEnabled, m_UiModel);
+      m_UiSplitHistoryView = std::make_shared<UiHistoryView>(splitParams, UiHistoryView::PaneSplit);
+    }
+    else
+    {
+      UiViewParams params(x, y, w, h, m_HistoryEnabled, m_UiModel);
+      m_UiHistoryView = std::make_shared<UiHistoryView>(params);
+      m_UiSplitBorderView.reset();
+      m_UiSplitHistoryView.reset();
+    }
   }
 }
 
@@ -120,6 +140,11 @@ void UiView::Draw()
   m_UiListView->Draw();
   m_UiListBorderView->Draw();
   m_UiHistoryView->Draw();
+  if (m_UiSplitHistoryView)
+  {
+    m_UiSplitBorderView->Draw();
+    m_UiSplitHistoryView->Draw();
+  }
   m_UiEntryView->Draw();
   curs_set(1);
 }
@@ -183,6 +208,15 @@ void UiView::SetStatusDirty(bool p_Dirty)
 void UiView::SetHistoryDirty(bool p_Dirty)
 {
   m_UiHistoryView->SetDirty(p_Dirty);
+  if (m_UiSplitHistoryView)
+  {
+    m_UiSplitHistoryView->SetDirty(p_Dirty);
+  }
+}
+
+void UiView::SetTopDirty(bool p_Dirty)
+{
+  m_UiTopView->SetDirty(p_Dirty);
 }
 
 void UiView::SetHelpDirty(bool p_Dirty)

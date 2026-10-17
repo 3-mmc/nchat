@@ -77,6 +77,7 @@ type ThreadMeta struct {
 	IsPinned   bool    `json:"is_pinned"`
 	IsMuted    bool    `json:"is_muted"`
 	OtherFBID  int64   `json:"other_fbid"` // 1:1 chats: the other participant
+	Handle     string  `json:"handle"`     // 1:1 chats: @username of the other participant
 	LastOwnMsg string  `json:"-"`
 }
 
@@ -104,6 +105,7 @@ type IgConn struct {
 	threads  map[string]*ThreadMeta // chat id (short ig thread id) -> meta
 	longToId map[string]string      // long thread id -> chat id
 	users    map[int64]string       // fbid -> display name
+	handles  map[int64]string       // fbid -> username
 	msgInfo  map[string]sentInfo    // msg id -> sender, for edits
 	lastErr  string
 }
@@ -234,6 +236,7 @@ func IgInit(path string, proxy string) int {
 		threads:  make(map[string]*ThreadMeta),
 		longToId: make(map[string]string),
 		users:    make(map[int64]string),
+		handles:  make(map[int64]string),
 		msgInfo:  make(map[string]sentInfo),
 	}
 
@@ -481,6 +484,15 @@ func IgCleanup(connId int) int {
 
 // --- threads / contacts ---
 
+// atHandle formats a username for the contact phone field; the ui shows a
+// phone starting with '@' as is, instead of prefixing it with '+'
+func atHandle(username string) string {
+	if username == "" {
+		return ""
+	}
+	return "@" + username
+}
+
 func (c *IgConn) userName(u *slidetypes.User) string {
 	if u == nil {
 		return ""
@@ -534,9 +546,15 @@ func (c *IgConn) registerThread(t *slidetypes.ThreadInfo) (string, *ThreadMeta) 
 			continue
 		}
 		c.users[fbid] = c.userName(u)
+		if u.Username != "" {
+			c.handles[fbid] = u.Username
+		}
 		members = append(members, fbid)
 		if fbid != c.ownFBID {
 			meta.OtherFBID = fbid
+			if !t.IsGroup && u.Username != "" {
+				meta.Handle = u.Username
+			}
 			names = append(names, c.userName(u))
 		}
 	}
@@ -551,6 +569,14 @@ func (c *IgConn) registerThread(t *slidetypes.ThreadInfo) (string, *ThreadMeta) 
 	for k, v := range c.users {
 		users[k] = v
 	}
+	handles := make(map[int64]string, len(c.handles))
+	for k, v := range c.handles {
+		handles[k] = v
+	}
+	chatHandle := ""
+	if !meta.IsGroup {
+		chatHandle = atHandle(meta.Handle)
+	}
 	c.mu.Unlock()
 
 	// contacts: group members, and the chat itself (named by title / other user)
@@ -558,10 +584,10 @@ func (c *IgConn) registerThread(t *slidetypes.ThreadInfo) (string, *ThreadMeta) 
 		if fbid == c.ownFBID {
 			continue
 		}
-		CIgNewContactsNotify(c.connId, strconv.FormatInt(fbid, 10), users[fbid], "", 0, 0, NotifyDirect)
+		CIgNewContactsNotify(c.connId, strconv.FormatInt(fbid, 10), users[fbid], atHandle(handles[fbid]), 0, 0, NotifyDirect)
 	}
 	if meta.Title != "" {
-		CIgNewContactsNotify(c.connId, chatId, meta.Title, "", 0, 0, NotifyDirect)
+		CIgNewContactsNotify(c.connId, chatId, meta.Title, chatHandle, 0, 0, NotifyDirect)
 	}
 
 	return chatId, meta
@@ -1083,17 +1109,21 @@ func IgGetContacts(connId int) int {
 	}
 	c.mu.Lock()
 	type kv struct {
-		id, name string
+		id, name, handle string
 	}
 	list := []kv{}
 	for fbid, name := range c.users {
 		if fbid != c.ownFBID && name != "" {
-			list = append(list, kv{strconv.FormatInt(fbid, 10), name})
+			list = append(list, kv{strconv.FormatInt(fbid, 10), name, atHandle(c.handles[fbid])})
 		}
 	}
 	for chatId, t := range c.threads {
 		if t.Title != "" {
-			list = append(list, kv{chatId, t.Title})
+			handle := ""
+			if !t.IsGroup {
+				handle = atHandle(t.Handle)
+			}
+			list = append(list, kv{chatId, t.Title, handle})
 		}
 	}
 	c.mu.Unlock()
@@ -1102,7 +1132,7 @@ func IgGetContacts(connId int) int {
 		if i == len(list)-1 {
 			notify = NotifySendCached
 		}
-		CIgNewContactsNotify(connId, e.id, e.name, "", 0, 0, notify)
+		CIgNewContactsNotify(connId, e.id, e.name, e.handle, 0, 0, notify)
 	}
 	return 0
 }
@@ -1412,12 +1442,16 @@ func (c *IgConn) handleDelta(d *slidetypes.Delta) {
 		c.mu.Unlock()
 		CIgUpdateMuteNotify(c.connId, chatId, BoolToInt(evt.IsMutedNow))
 	case *slidetypes.UpdateThreadNameEvent:
+		handle := ""
 		c.mu.Lock()
 		if meta := c.threads[chatId]; meta != nil {
 			meta.Title = evt.ThreadName
+			if !meta.IsGroup {
+				handle = atHandle(meta.Handle)
+			}
 		}
 		c.mu.Unlock()
-		CIgNewContactsNotify(c.connId, chatId, evt.ThreadName, "", 0, 0, NotifyDirect)
+		CIgNewContactsNotify(c.connId, chatId, evt.ThreadName, handle, 0, 0, NotifyDirect)
 		if evt.Message != nil {
 			c.notifyMessage(chatId, evt.Message, time.Time{}, time.Time{}, false, "")
 		}

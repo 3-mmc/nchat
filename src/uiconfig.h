@@ -19,6 +19,7 @@ public:
   static bool GetBool(const std::string& p_Param);
   static void SetBool(const std::string& p_Param, const bool& p_Value);
   static std::string GetStr(const std::string& p_Param);
+  static void SetStr(const std::string& p_Param, const std::string& p_Value);
   static int GetNum(const std::string& p_Param);
   static void SetNum(const std::string& p_Param, const int& p_Value);
 

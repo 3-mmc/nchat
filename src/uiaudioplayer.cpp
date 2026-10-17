@@ -31,8 +31,7 @@ int UiAudioPlayer::m_LastElapsedSec = -1;
 
 bool UiAudioPlayer::IsEnabled()
 {
-  static const bool isEnabled = UiConfig::GetBool("inline_audio");
-  return isEnabled;
+  return UiConfig::GetBool("inline_audio");
 }
 
 bool UiAudioPlayer::IsAudio(const std::string& p_FilePath)

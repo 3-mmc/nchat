@@ -39,6 +39,7 @@ public:
   void SetHistoryDirty(bool p_Dirty);
   void SetHelpDirty(bool p_Dirty);
   void SetEntryDirty(bool p_Dirty);
+  void SetTopDirty(bool p_Dirty);
   int GetHistoryShowCount();
   int GetHistoryLines();
   int GetEntryWidth();
@@ -63,6 +64,8 @@ private:
   std::shared_ptr<UiListView> m_UiListView;
   std::shared_ptr<UiListBorderView> m_UiListBorderView;
   std::shared_ptr<UiHistoryView> m_UiHistoryView;
+  std::shared_ptr<UiListBorderView> m_UiSplitBorderView; // split view only
+  std::shared_ptr<UiHistoryView> m_UiSplitHistoryView; // split view only
 
   bool m_EmojiEnabled = true;
   bool m_TopEnabled = true;

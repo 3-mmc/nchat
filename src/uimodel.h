@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <map>
 #include <mutex>
 #include <set>
 #include <stack>
@@ -68,6 +69,28 @@ private:
     void OnKeyPlayAudio();
     void OnKeyTogglePinnedOnly();
     std::string GetListViewLabel();
+
+    // tabs, split view, accounts and preferences
+    void OnKeySwitchTab(int p_Index);
+    void OnKeyToggleTab();
+    void OnKeyToggleSplit();
+    void OnKeySwapSplit();
+    void AddTab(const std::pair<std::string, std::string>& p_Chat);
+    void SwitchToChat(const std::pair<std::string, std::string>& p_Chat);
+    std::vector<std::pair<std::string, std::string>> GetTabs();
+    std::pair<std::string, std::string> GetSplitChat();
+    bool GetSplitEnabled();
+    void LoadTabs();
+    void SaveTabs();
+    std::vector<std::string> GetOrderedProfileIds();
+    std::string GetProfileConnState(const std::string& p_ProfileId);
+    std::string GetProtocolLabel(const std::string& p_ProfileId);
+    std::string GetContactHandle(const std::string& p_ProfileId, const std::string& p_ChatId);
+    void MoveAccount(const std::string& p_ProfileId, int p_Delta);
+    bool IsProfilePinnedOnly(const std::string& p_ProfileId);
+    void SetProfilePinnedOnly(const std::string& p_ProfileId, bool p_PinnedOnly);
+    void ApplyPreferences();
+
     void OnKeyOpenMsg();
     bool GetMessageAttachmentPath(std::string& p_FilePath, DownloadFileAction p_DownloadFileAction);
     void OnKeyOpenAttachment(std::string p_FilePath = std::string());
@@ -213,6 +236,7 @@ private:
     void ProtocolSetCurrentChat();
     int GetHistoryLines();
     void UpdateList();
+    void UpdateTop();
     void UpdateStatus();
     void UpdateHelp();
     void UpdateHistory();
@@ -256,6 +280,11 @@ private:
     std::vector<std::pair<std::string, std::string>> m_ChatVec;
     std::string m_ListViewProtocol; // empty = all protocols
     bool m_PinnedOnlyActive = true;
+    std::vector<std::string> m_PinnedOnlyProfiles; // pinned_only_profiles
+    std::vector<std::pair<std::string, std::string>> m_Tabs;
+    std::pair<std::string, std::string> m_SplitChat;
+    bool m_SplitEnabled = false;
+    std::map<std::string, std::string> m_ProfileConnState;
     std::set<std::pair<std::string, std::string>> m_LocalArchived; // archive_local=1
     std::unordered_map<std::string, std::unordered_map<std::string, ChatInfo>> m_ChatInfos;
     std::unordered_map<std::string, std::unordered_map<std::string, ContactInfo>> m_ContactInfos;
@@ -359,6 +388,19 @@ public:
   bool GetChatIsUnreadLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetChatStatusLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetListViewLabelLocked();
+  std::vector<std::pair<std::string, std::string>> GetTabsLocked();
+  std::pair<std::string, std::string> GetSplitChatLocked();
+  bool GetSplitEnabledLocked();
+  std::string GetProtocolLabelLocked(const std::string& p_ProfileId);
+  std::string GetContactHandleLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
+
+  // preferences dialog (takes model mutex)
+  std::vector<std::string> GetOrderedProfileIds();
+  std::string GetProfileConnState(const std::string& p_ProfileId);
+  std::string GetProtocolLabel(const std::string& p_ProfileId);
+  void MoveAccount(const std::string& p_ProfileId, int p_Delta);
+  bool IsProfilePinnedOnly(const std::string& p_ProfileId);
+  void SetProfilePinnedOnly(const std::string& p_ProfileId, bool p_PinnedOnly);
   std::vector<std::pair<std::string, std::string>>& GetChatVecLocked();
   std::string GetContactListNameLocked(const std::string& p_ProfileId, const std::string& p_ChatId, bool p_AllowId,
                                        bool p_AllowAlias);
@@ -409,6 +451,7 @@ private:
   }
 
   void OnKeyGotoChat();
+  void OnKeyPreferences();
   std::vector<std::string> SelectFile();
   void OnKeyTransfer();
   void OnKeySelectEmoji();

@@ -19,7 +19,7 @@ public:
   virtual ~UiListDialog();
 
   bool Run();
-  void KeyHandler(wint_t p_Key);
+  virtual void KeyHandler(wint_t p_Key);
 
 protected:
   virtual void OnSelect() = 0;
@@ -27,9 +27,7 @@ protected:
   virtual bool OnTimer() = 0;
   virtual void UpdateList() = 0;
 
-  void UpdateFooter();
-
-private:
+  virtual void UpdateFooter();
   void Draw();
 
 protected:

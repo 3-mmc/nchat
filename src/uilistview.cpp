@@ -57,6 +57,8 @@ void UiListView::Draw()
   const std::vector<std::pair<std::string, std::string>>& p_ChatVec = m_Model->GetChatVecLocked();
 
   const bool emojiEnabled = m_Model->GetEmojiEnabledLocked();
+  const bool showProtocol = UiConfig::GetBool("protocol_labels") && m_Model->IsMultipleProfilesLocked() &&
+    (m_PaddedW > 4);
   std::vector<std::string> names;
   std::vector<bool> unreads;
   for (auto& chatPair : p_ChatVec)
@@ -108,15 +110,27 @@ void UiListView::Draw()
         name = StrUtil::Textize(name);
       }
 
-      std::wstring wname = StrUtil::ToWString(name).substr(0, m_PaddedW);
-      wname = StrUtil::TrimPadWString(wname, m_PaddedW);
+      // coloured account marker in front of each chat when several accounts are set up
+      const int markerW = showProtocol ? 1 : 0;
+      if (showProtocol)
+      {
+        const int protocolPair = UiColorConfig::GetProtocolColorPair(p_ChatVec[i].first);
+        wattroff(m_PaddedWin, attribute | attributeSelected | colorPair);
+        wattron(m_PaddedWin, protocolPair);
+        mvwaddnwstr(m_PaddedWin, y, 0, L"\u258e", 1); // ▎
+        wattroff(m_PaddedWin, protocolPair);
+        wattron(m_PaddedWin, colorPair | ((i == index) ? attributeSelected : attribute));
+      }
+
+      std::wstring wname = StrUtil::ToWString(name).substr(0, m_PaddedW - markerW);
+      wname = StrUtil::TrimPadWString(wname, m_PaddedW - markerW);
 
       if (unreads[i])
       {
         wattron(m_PaddedWin, colorPairUnread);
       }
 
-      mvwaddnwstr(m_PaddedWin, y, 0, wname.c_str(), wname.size());
+      mvwaddnwstr(m_PaddedWin, y, markerW, wname.c_str(), wname.size());
 
       if (unreads[i])
       {

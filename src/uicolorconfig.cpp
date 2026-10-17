@@ -88,6 +88,16 @@ void UiColorConfig::Init()
     { "dialog_shaded_color_bg", "" },
     { "dialog_shaded_color_fg", defaultShadedColor },
 
+    // protocol labels / tab markers, keyed by lower case protocol name
+    { "protocol_whatsappmd_color_bg", "" },
+    { "protocol_whatsappmd_color_fg", (COLORS > 8) ? "0x25d366" : "green" },
+    { "protocol_signal_color_bg", "" },
+    { "protocol_signal_color_fg", (COLORS > 8) ? "0x3a76f0" : "blue" },
+    { "protocol_instagram_color_bg", "" },
+    { "protocol_instagram_color_fg", (COLORS > 8) ? "0xe1306c" : "magenta" },
+    { "protocol_telegram_color_bg", "" },
+    { "protocol_telegram_color_fg", (COLORS > 8) ? "0x2aabee" : "cyan" },
+
     { "default_color_bg", "" },
     { "default_color_fg", "" },
   };
@@ -127,6 +137,15 @@ int UiColorConfig::GetColorPair(const std::string& p_Param)
 
   colorPairs[p_Param] = COLOR_PAIR(id);
   return colorPairs[p_Param];
+}
+
+int UiColorConfig::GetProtocolColorPair(const std::string& p_ProfileId)
+{
+  const std::string protocolName = StrUtil::ToLower(p_ProfileId.substr(0, p_ProfileId.find('_')));
+  const std::string param = "protocol_" + protocolName + "_color";
+  if (m_Config.Get(param + "_fg").empty() && m_Config.Get(param + "_bg").empty()) return 0;
+
+  return GetColorPair(param);
 }
 
 int UiColorConfig::GetUserColorPair(const std::string& p_Param, const std::string& p_UserId)

@@ -24,8 +24,9 @@
 
 bool UiImagePreview::IsEnabled()
 {
-  static const bool isEnabled = UiConfig::GetBool("inline_images") && has_colors() && (COLORS >= 256);
-  return isEnabled;
+  // media_display can be changed at runtime from the preferences dialog
+  static const bool hasColors = has_colors() && (COLORS >= 256);
+  return hasColors && (UiConfig::GetStr("media_display") == "preview");
 }
 
 bool UiImagePreview::IsPreviewable(const std::string& p_FilePath)
@@ -71,11 +72,11 @@ std::string UiImagePreview::GetVideoThumbnail(const std::string& p_FilePath)
 
 const UiImageRows& UiImagePreview::GetRows(const std::string& p_FilePath, int p_MaxW)
 {
-  static const int maxH = std::max(1, (int)UiConfig::GetNum("inline_image_lines"));
+  const int maxH = std::max(1, (int)UiConfig::GetNum("inline_image_lines"));
   static std::map<std::string, UiImageRows> cache;
 
   // palette entries redefined by hex colors may grow while drawing, so key on it too
-  const std::string key = p_FilePath + "|" + std::to_string(p_MaxW) + "|" +
+  const std::string key = p_FilePath + "|" + std::to_string(p_MaxW) + "x" + std::to_string(maxH) + "|" +
     std::to_string(UiColorConfig::GetLastCustomColorId());
   auto it = cache.find(key);
   if (it != cache.end()) return it->second;

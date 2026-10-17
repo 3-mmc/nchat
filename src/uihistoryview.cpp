@@ -7,6 +7,8 @@
 
 #include "uihistoryview.h"
 
+#include <cstdlib>
+
 #include "appconfig.h"
 #include "apputil.h"
 #include "fileutil.h"
@@ -20,8 +22,9 @@
 #include "uiimagepreview.h"
 #include "uimodel.h"
 
-UiHistoryView::UiHistoryView(const UiViewParams& p_Params)
+UiHistoryView::UiHistoryView(const UiViewParams& p_Params, Pane p_Pane)
   : UiViewBase(p_Params)
+  , m_Pane(p_Pane)
 {
   if (m_Enabled)
   {
@@ -75,7 +78,15 @@ void UiHistoryView::Draw()
   static std::wstring quoteIndicator = L"> ";
   static std::wstring imageRowIndicator = L"\uF8FF"; // placeholder line for an inline image row
 
-  std::pair<std::string, std::string>& currentChat = m_Model->GetCurrentChatLocked();
+  // the split pane shows the docked chat, read-only (no selection / scrolling)
+  const bool isSplitPane = (m_Pane == PaneSplit);
+  std::pair<std::string, std::string> currentChat =
+    isSplitPane ? m_Model->GetSplitChatLocked() : m_Model->GetCurrentChatLocked();
+  if (m_Pane != PaneSingle)
+  {
+    DrawPaneHeader(currentChat);
+  }
+
   const bool emojiEnabled = m_Model->GetEmojiEnabledLocked();
   static const bool developerMode = AppUtil::GetDeveloperMode();
 
@@ -83,7 +94,9 @@ void UiHistoryView::Draw()
     m_Model->GetMessageVecLocked(currentChat.first, currentChat.second);
   std::unordered_map<std::string, ChatMessage>& messages =
     m_Model->GetMessagesLocked(currentChat.first, currentChat.second);
-  int messageOffset = std::max(m_Model->GetMessageOffsetLocked(currentChat.first, currentChat.second), 0);
+  int messageOffset = isSplitPane ? 0 :
+    std::max(m_Model->GetMessageOffsetLocked(currentChat.first, currentChat.second), 0);
+  messageOffset = std::min(messageOffset, (int)messageVec.size());
 
   werase(m_PaddedWin);
   wbkgd(m_PaddedWin, attributeTextNormal | colorPairTextRecv | ' ');
@@ -94,7 +107,7 @@ void UiHistoryView::Draw()
   int y = m_PaddedH - 1;
   for (auto it = std::next(messageVec.begin(), messageOffset); it != messageVec.end(); ++it)
   {
-    bool isSelectedMessage = firstMessage && m_Model->GetSelectMessageActiveLocked();
+    bool isSelectedMessage = firstMessage && !isSplitPane && m_Model->GetSelectMessageActiveLocked();
 
     auto msgIt = messages.find(*it);
     if (msgIt == messages.end())
@@ -196,6 +209,16 @@ void UiHistoryView::Draw()
       }
 
       std::string fileName = FileUtil::BaseName(fileInfo.filePath);
+      if ((UiConfig::GetStr("media_display") == "path") && (fileInfo.fileStatus == FileStatusDownloaded))
+      {
+        static const std::string homeDir = (getenv("HOME") != nullptr) ? getenv("HOME") : "";
+        fileName = fileInfo.filePath;
+        if (!homeDir.empty() && StrUtil::StartsWith(fileName, homeDir + "/"))
+        {
+          fileName = "~" + fileName.substr(homeDir.size());
+        }
+      }
+
       std::string fileStatus;
       if (fileInfo.fileStatus == FileStatusNone)
       {
@@ -463,6 +486,31 @@ void UiHistoryView::Draw()
   }
 
   wrefresh(m_PaddedWin);
+}
+
+void UiHistoryView::DrawPaneHeader(const std::pair<std::string, std::string>& p_Chat)
+{
+  // chat name on the padding row above the pane: bold for the active pane
+  std::string name = m_Model->GetContactListNameLocked(p_Chat.first, p_Chat.second, true /*p_AllowId*/,
+                                                       true /*p_AllowAlias*/);
+  if (!m_Model->GetEmojiEnabledLocked())
+  {
+    name = StrUtil::Textize(name);
+  }
+
+  const bool isActive = (m_Pane == PaneMain);
+  const int hpad = (m_X == 0) ? 0 : 1;
+  const std::string label = std::string(isActive ? "\xe2\x96\xb8 " : "  ") + name + // ▸
+    (m_Model->IsMultipleProfilesLocked() ? "  " + m_Model->GetProtocolLabelLocked(p_Chat.first) : "");
+  std::wstring wlabel = StrUtil::TrimPadWString(StrUtil::ToWString(label), std::max(0, m_W - (2 * hpad)));
+
+  static int attributeTextNormal = UiColorConfig::GetAttribute("history_text_attr");
+  static int colorPairTextRecv = UiColorConfig::GetColorPair("history_text_recv_color");
+  const int attr = isActive ? (A_BOLD | A_UNDERLINE) : A_DIM;
+  wattron(m_Win, attributeTextNormal | colorPairTextRecv | attr);
+  mvwaddnwstr(m_Win, 0, hpad, wlabel.c_str(), wlabel.size());
+  wattroff(m_Win, attributeTextNormal | colorPairTextRecv | attr);
+  wrefresh(m_Win);
 }
 
 int UiHistoryView::GetHistoryShowCount()

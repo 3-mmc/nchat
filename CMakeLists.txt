@@ -430,12 +430,14 @@ add_executable(nchat
   src/uifilelistdialog.h
   src/uihelpview.cpp
   src/uihelpview.h
-  src/uihistoryview.cpp
   src/uiaudioplayer.cpp
-  src/uiimagepreview.cpp
-  src/uihistoryview.h
   src/uiaudioplayer.h
+  src/uihistoryview.cpp
+  src/uihistoryview.h
+  src/uiimagepreview.cpp
   src/uiimagepreview.h
+  src/uiprefsdialog.cpp
+  src/uiprefsdialog.h
   src/uikeyconfig.cpp
   src/uikeyconfig.h
   src/uikeydump.cpp

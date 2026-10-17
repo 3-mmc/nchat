@@ -66,7 +66,11 @@ void UiConfig::Init()
     { "phone_number_indicator", "" },
     { "pinned_indicator", "\xe2\x9a\xb2" },
     { "pinned_only_profiles", "" },
-    { "inline_images", "1" },
+    { "media_display", "preview" }, // preview, name or path
+    { "show_contact_handle", "1" },
+    { "protocol_labels", "1" },
+    { "account_order", "" },
+    { "tabs_enabled", "1" },
     { "archive_local", "0" },
     { "inline_audio", "1" },
     { "inline_image_lines", "10" },
@@ -111,6 +115,11 @@ void UiConfig::SetBool(const std::string& p_Param, const bool& p_Value)
 std::string UiConfig::GetStr(const std::string& p_Param)
 {
   return m_Config.Get(p_Param);
+}
+
+void UiConfig::SetStr(const std::string& p_Param, const std::string& p_Value)
+{
+  m_Config.Set(p_Param, p_Value);
 }
 
 int UiConfig::GetNum(const std::string& p_Param)

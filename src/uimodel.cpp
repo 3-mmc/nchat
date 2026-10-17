@@ -39,6 +39,7 @@
 #include "uikeyconfig.h"
 #include "uikeyinput.h"
 #include "uimessagedialog.h"
+#include "uiprefsdialog.h"
 #include "uitextinputdialog.h"
 #include "uiview.h"
 
@@ -61,6 +62,8 @@ void UiModel::Impl::Init()
 {
   m_View->Init();
   LoadLocalArchive();
+  LoadTabs();
+  ApplyPreferences();
 }
 
 void UiModel::Impl::Cleanup()
@@ -206,6 +209,8 @@ void UiModel::Impl::SendMessage()
 
   entryStr.clear();
   entryPos = 0;
+
+  AddTab(m_CurrentChat); // chats written in get a tab
 
   UpdateEntry();
   ResetMessageOffset();
@@ -1012,7 +1017,7 @@ void UiModel::Impl::OnKeyArchiveChat()
   const std::string& profileId = m_CurrentChat.first;
   const std::string& chatId = m_CurrentChat.second;
 
-  static const bool archiveLocal = UiConfig::GetBool("archive_local");
+  const bool archiveLocal = UiConfig::GetBool("archive_local"); // live: preferences
   if (archiveLocal)
   {
     const std::pair<std::string, std::string> chat(profileId, chatId);
@@ -1637,6 +1642,7 @@ void UiModel::Impl::OpenCreateChat(const std::pair<std::string, std::string>& p_
     SortChats();
     OnCurrentChatChanged();
     SetSelectMessageActive(false);
+    AddTab(m_CurrentChat);
   }
   else
   {
@@ -1680,6 +1686,8 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
       {
         std::shared_ptr<ConnectNotify> connectNotify = std::static_pointer_cast<ConnectNotify>(p_ServiceMessage);
         LOG_TRACE("connect notify %d", connectNotify->success);
+        m_ProfileConnState[profileId] = connectNotify->success ? "connected" : "failed";
+        UpdateList(); // account labels
         if (!HasProtocolFeature(profileId, FeatureAutoGetChatsOnLogin))
         {
           std::shared_ptr<GetChatsRequest> getChatsRequest = std::make_shared<GetChatsRequest>();
@@ -1859,6 +1867,11 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
             }
 
             SetHistoryInteraction(false);
+
+            if (m_SplitEnabled && (m_SplitChat == std::make_pair(profileId, chatId)))
+            {
+              UpdateHistory();
+            }
           }
 
           const std::pair<std::string, std::string>& nextChat = GetNextChat();
@@ -2777,7 +2790,9 @@ std::string UiModel::Impl::GetContactListName(const std::string& p_ProfileId, co
 std::string UiModel::Impl::GetContactPhone(const std::string& p_ProfileId, const std::string& p_ChatId)
 {
   const ContactInfo& contactInfo = m_ContactInfos[p_ProfileId][p_ChatId];
-  return contactInfo.phone.empty() ? "" : "+" + contactInfo.phone;
+  if (contactInfo.phone.empty()) return "";
+
+  return (contactInfo.phone[0] == '@') ? contactInfo.phone : "+" + contactInfo.phone; // '@': user name handle
 }
 
 bool UiModel::Impl::IsContactSelf(const std::string& p_ProfileId, const std::string& p_ContactId)
@@ -3132,6 +3147,12 @@ void UiModel::Impl::UpdateList()
 {
   m_View->SetListDirty(true);
   m_View->SetEntryDirty(true);
+  m_View->SetTopDirty(true); // tab bar shows current / unread chats
+}
+
+void UiModel::Impl::UpdateTop()
+{
+  m_View->SetTopDirty(true);
 }
 
 void UiModel::Impl::UpdateStatus()
@@ -3363,7 +3384,7 @@ void UiModel::Impl::SetTerminalActive(bool p_TerminalActive)
 
 void UiModel::Impl::DesktopNotify(const std::string& p_Name, const std::string& p_Text)
 {
-  static const bool desktopNotifyEnabled = UiConfig::GetBool("desktop_notify_enabled");
+  const bool desktopNotifyEnabled = UiConfig::GetBool("desktop_notify_enabled"); // live: preferences
   if (!desktopNotifyEnabled) return;
 
   static const std::string cmdTemplate = [this]()
@@ -3937,7 +3958,7 @@ std::string UiModel::Impl::PreExtCall()
 {
   AnyUserKeyInput();
   const std::string phone = GetContactPhone(m_CurrentChat.first, m_CurrentChat.second);
-  return phone;
+  return StrUtil::StartsWith(phone, "@") ? "" : phone; // user name handles are not callable
 }
 
 void UiModel::Impl::StartExtCall(const std::string& p_Phone)
@@ -4415,16 +4436,7 @@ bool UiModel::Impl::IsChatForceHidden(const std::string& p_ChatId)
 bool UiModel::Impl::IsChatPinFiltered(const std::string& p_ProfileId, const std::string& p_ChatId)
 {
   // pinned_only_profiles: comma-separated profile ids or protocol names (e.g. "Signal")
-  static const std::vector<std::string> pinnedOnlyProfiles = []()
-  {
-    std::vector<std::string> profiles;
-    for (std::string profile : StrUtil::Split(UiConfig::GetStr("pinned_only_profiles"), ','))
-    {
-      StrUtil::Trim(profile);
-      if (!profile.empty()) profiles.push_back(profile);
-    }
-    return profiles;
-  }();
+  const std::vector<std::string>& pinnedOnlyProfiles = m_PinnedOnlyProfiles;
   if (!m_PinnedOnlyActive || pinnedOnlyProfiles.empty()) return false;
 
   const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
@@ -4571,11 +4583,15 @@ void UiModel::Impl::OnKeyPlayAudio()
 
 void UiModel::Impl::OnKeyCycleListView()
 {
-  // cycle: all -> each protocol (sorted) -> all
-  std::set<std::string> protocolNames;
-  for (const auto& protocol : m_Protocols)
+  // protocols in account order (preferences)
+  std::vector<std::string> protocolNames;
+  for (const auto& profileId : GetOrderedProfileIds())
   {
-    protocolNames.insert(protocol.first.substr(0, protocol.first.find('_')));
+    const std::string protocolName = profileId.substr(0, profileId.find('_'));
+    if (std::find(protocolNames.begin(), protocolNames.end(), protocolName) == protocolNames.end())
+    {
+      protocolNames.push_back(protocolName);
+    }
   }
 
   // cycle: all -> each protocol (if several) -> archived (if any locally archived) -> all
@@ -4605,11 +4621,11 @@ void UiModel::Impl::OnKeyTogglePinnedOnly()
 
 std::string UiModel::Impl::GetListViewLabel()
 {
-  static const bool hasPinnedOnlyProfiles = !UiConfig::GetStr("pinned_only_profiles").empty();
+  const bool hasPinnedOnlyProfiles = !m_PinnedOnlyProfiles.empty();
   std::string label;
   if (!m_ListViewProtocol.empty())
   {
-    label = (m_ListViewProtocol == "WhatsAppMd") ? "WhatsApp" : m_ListViewProtocol;
+    label = GetProtocolLabel(m_ListViewProtocol);
   }
 
   if (hasPinnedOnlyProfiles && !m_PinnedOnlyActive)
@@ -4618,6 +4634,299 @@ std::string UiModel::Impl::GetListViewLabel()
   }
 
   return label.empty() ? label : ("[" + label + "]");
+}
+
+std::string UiModel::Impl::GetProtocolLabel(const std::string& p_ProfileId)
+{
+  // accepts a profile id or protocol name, e.g. "WhatsAppMd_+123" -> "WhatsApp"
+  const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
+  return (protocolName == "WhatsAppMd") ? "WhatsApp" : protocolName;
+}
+
+std::string UiModel::Impl::GetContactHandle(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  // phone number or @user name of the other party in 1:1 chats
+  if (GetChatInfoIsGroup(p_ProfileId, p_ChatId)) return std::string();
+
+  if (m_ContactInfos[p_ProfileId][p_ChatId].isSelf) return std::string();
+
+  return GetContactPhone(p_ProfileId, p_ChatId);
+}
+
+static const std::string s_TabsPath = "/tabs.txt";
+
+void UiModel::Impl::LoadTabs()
+{
+  // one "profileId chatId" per line
+  const std::string path = FileUtil::GetApplicationDir() + s_TabsPath;
+  if (!FileUtil::Exists(path)) return;
+
+  for (const auto& line : StrUtil::Split(FileUtil::ReadFile(path), '\n'))
+  {
+    const size_t sep = line.find(' ');
+    if (sep == std::string::npos) continue;
+
+    const std::pair<std::string, std::string> chat(line.substr(0, sep), line.substr(sep + 1));
+    if (m_Protocols.count(chat.first) && (std::find(m_Tabs.begin(), m_Tabs.end(), chat) == m_Tabs.end()))
+    {
+      m_Tabs.push_back(chat);
+    }
+  }
+}
+
+void UiModel::Impl::SaveTabs()
+{
+  std::string data;
+  for (const auto& chat : m_Tabs)
+  {
+    data += chat.first + " " + chat.second + "\n";
+  }
+
+  FileUtil::WriteFile(FileUtil::GetApplicationDir() + s_TabsPath, data);
+}
+
+std::vector<std::pair<std::string, std::string>> UiModel::Impl::GetTabs()
+{
+  return m_Tabs;
+}
+
+void UiModel::Impl::AddTab(const std::pair<std::string, std::string>& p_Chat)
+{
+  static const size_t maxTabs = 9; // alt-1 .. alt-9
+  if (!UiConfig::GetBool("tabs_enabled") || (p_Chat == s_ChatNone)) return;
+
+  if (std::find(m_Tabs.begin(), m_Tabs.end(), p_Chat) != m_Tabs.end()) return;
+
+  if (m_Tabs.size() >= maxTabs)
+  {
+    // drop the oldest tab that is neither current nor shown in the split view
+    for (auto it = m_Tabs.begin(); it != m_Tabs.end(); ++it)
+    {
+      if ((*it != m_CurrentChat) && (*it != m_SplitChat))
+      {
+        m_Tabs.erase(it);
+        break;
+      }
+    }
+  }
+
+  m_Tabs.push_back(p_Chat);
+  SaveTabs();
+  ReinitView(); // the tab bar may appear
+  m_View->Draw();
+}
+
+void UiModel::Impl::SwitchToChat(const std::pair<std::string, std::string>& p_Chat)
+{
+  if (p_Chat == s_ChatNone) return;
+
+  // list the chat even when the current view would hide it
+  if (m_ChatSet[p_Chat.first].insert(p_Chat.second).second)
+  {
+    m_ChatVec.push_back(p_Chat);
+  }
+
+  m_CurrentChat = p_Chat;
+  m_CurrentChatIndex = 0;
+  SortChats();
+  OnCurrentChatChanged();
+  SetSelectMessageActive(false);
+}
+
+void UiModel::Impl::OnKeySwitchTab(int p_Index)
+{
+  AnyUserKeyInput();
+  if ((p_Index < 0) || (p_Index >= (int)m_Tabs.size())) return;
+
+  const std::pair<std::string, std::string> chat = m_Tabs.at(p_Index);
+  if (chat == m_CurrentChat) return;
+
+  if (m_SplitEnabled && (chat == m_SplitChat))
+  {
+    m_SplitChat = m_CurrentChat; // keep both chats on screen, swapped
+  }
+
+  SwitchToChat(chat);
+  UpdateTop();
+}
+
+void UiModel::Impl::OnKeyToggleTab()
+{
+  AnyUserKeyInput();
+  if (m_CurrentChat == s_ChatNone) return;
+
+  auto it = std::find(m_Tabs.begin(), m_Tabs.end(), m_CurrentChat);
+  if (it != m_Tabs.end())
+  {
+    m_Tabs.erase(it);
+    SaveTabs();
+    ReinitView();
+    m_View->Draw();
+  }
+  else
+  {
+    const bool tabsEnabled = UiConfig::GetBool("tabs_enabled");
+    UiConfig::SetBool("tabs_enabled", true); // explicit request
+    AddTab(m_CurrentChat);
+    UiConfig::SetBool("tabs_enabled", tabsEnabled);
+  }
+}
+
+bool UiModel::Impl::GetSplitEnabled()
+{
+  return m_SplitEnabled && (m_SplitChat != s_ChatNone);
+}
+
+std::pair<std::string, std::string> UiModel::Impl::GetSplitChat()
+{
+  return m_SplitChat;
+}
+
+void UiModel::Impl::OnKeyToggleSplit()
+{
+  // split on: dock the current chat in the right pane, keep browsing on the left
+  AnyUserKeyInput();
+  if (m_SplitEnabled)
+  {
+    m_SplitEnabled = false;
+    m_SplitChat = s_ChatNone;
+  }
+  else
+  {
+    if (m_CurrentChat == s_ChatNone) return;
+
+    m_SplitEnabled = true;
+    m_SplitChat = m_CurrentChat;
+    AddTab(m_SplitChat);
+
+    // move focus to the most recent other tab, if any
+    for (auto it = m_Tabs.rbegin(); it != m_Tabs.rend(); ++it)
+    {
+      if (*it != m_SplitChat)
+      {
+        SwitchToChat(*it);
+        break;
+      }
+    }
+  }
+
+  ReinitView();
+  m_View->Draw();
+}
+
+void UiModel::Impl::OnKeySwapSplit()
+{
+  AnyUserKeyInput();
+  if (!GetSplitEnabled()) return;
+
+  const std::pair<std::string, std::string> chat = m_SplitChat;
+  m_SplitChat = m_CurrentChat;
+  SwitchToChat(chat);
+  UpdateTop();
+}
+
+std::vector<std::string> UiModel::Impl::GetOrderedProfileIds()
+{
+  // account_order: comma-separated profile ids or protocol names, others follow sorted
+  std::vector<std::string> order;
+  for (std::string entry : StrUtil::Split(UiConfig::GetStr("account_order"), ','))
+  {
+    StrUtil::Trim(entry);
+    if (!entry.empty()) order.push_back(entry);
+  }
+
+  std::vector<std::string> profileIds;
+  for (const auto& protocol : m_Protocols)
+  {
+    profileIds.push_back(protocol.first);
+  }
+
+  auto rank = [&](const std::string& p_ProfileId) -> size_t
+  {
+    const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
+    for (size_t i = 0; i < order.size(); ++i)
+    {
+      if ((order[i] == p_ProfileId) || (order[i] == protocolName)) return i;
+    }
+
+    return order.size();
+  };
+
+  std::sort(profileIds.begin(), profileIds.end(), [&](const std::string& lhs, const std::string& rhs)
+  {
+    const size_t lrank = rank(lhs);
+    const size_t rrank = rank(rhs);
+    return (lrank != rrank) ? (lrank < rrank) : (lhs < rhs);
+  });
+
+  return profileIds;
+}
+
+void UiModel::Impl::MoveAccount(const std::string& p_ProfileId, int p_Delta)
+{
+  std::vector<std::string> profileIds = GetOrderedProfileIds();
+  auto it = std::find(profileIds.begin(), profileIds.end(), p_ProfileId);
+  if (it == profileIds.end()) return;
+
+  const int from = it - profileIds.begin();
+  const int to = from + p_Delta;
+  if ((to < 0) || (to >= (int)profileIds.size())) return;
+
+  std::swap(profileIds[from], profileIds[to]);
+  UiConfig::SetStr("account_order", StrUtil::Join(profileIds, ","));
+}
+
+std::string UiModel::Impl::GetProfileConnState(const std::string& p_ProfileId)
+{
+  auto it = m_ProfileConnState.find(p_ProfileId);
+  return (it != m_ProfileConnState.end()) ? it->second : "connecting";
+}
+
+bool UiModel::Impl::IsProfilePinnedOnly(const std::string& p_ProfileId)
+{
+  const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
+  return std::find_if(m_PinnedOnlyProfiles.begin(), m_PinnedOnlyProfiles.end(), [&](const std::string& p_Entry)
+  {
+    return (p_Entry == p_ProfileId) || (p_Entry == protocolName);
+  }) != m_PinnedOnlyProfiles.end();
+}
+
+void UiModel::Impl::SetProfilePinnedOnly(const std::string& p_ProfileId, bool p_PinnedOnly)
+{
+  const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
+  std::vector<std::string> profiles;
+  for (const auto& entry : m_PinnedOnlyProfiles)
+  {
+    if ((entry != p_ProfileId) && (entry != protocolName)) profiles.push_back(entry);
+  }
+
+  if (p_PinnedOnly)
+  {
+    profiles.push_back(p_ProfileId);
+  }
+
+  m_PinnedOnlyProfiles = profiles;
+  UiConfig::SetStr("pinned_only_profiles", StrUtil::Join(profiles, ","));
+}
+
+void UiModel::Impl::ApplyPreferences()
+{
+  // re-read options the preferences dialog may have changed
+  m_PinnedOnlyProfiles.clear();
+  for (std::string profile : StrUtil::Split(UiConfig::GetStr("pinned_only_profiles"), ','))
+  {
+    StrUtil::Trim(profile);
+    if (!profile.empty()) m_PinnedOnlyProfiles.push_back(profile);
+  }
+
+  FileUtil::SetDownloadsDir(AppConfig::GetStr("downloads_dir"));
+
+  if (m_View)
+  {
+    RebuildChatList();
+    UpdateHistory();
+    ReinitView();
+  }
 }
 
 bool UiModel::Impl::IsChatForceMuted(const std::string& p_ChatId)
@@ -4644,6 +4953,7 @@ void UiModel::Impl::GotoChat(const std::pair<std::string, std::string>& p_Chat)
   if (found)
   {
     OnCurrentChatChanged();
+    AddTab(m_CurrentChat);
   }
   else
   {
@@ -4862,6 +5172,19 @@ void UiModel::KeyHandler(wint_t p_Key)
   static wint_t keyCycleListView = UiKeyConfig::GetKey("cycle_list_view");
   static wint_t keyTogglePinnedOnly = UiKeyConfig::GetKey("toggle_pinned_only");
   static wint_t keyPlayAudio = UiKeyConfig::GetKey("play_audio");
+  static wint_t keyToggleTab = UiKeyConfig::GetKey("toggle_tab");
+  static wint_t keyToggleSplit = UiKeyConfig::GetKey("toggle_split");
+  static wint_t keySwapSplit = UiKeyConfig::GetKey("swap_split");
+  static wint_t keyPreferences = UiKeyConfig::GetKey("preferences");
+  static const std::vector<wint_t> keyTabs = []()
+  {
+    std::vector<wint_t> keys;
+    for (int i = 1; i <= 9; ++i)
+    {
+      keys.push_back(UiKeyConfig::GetKey("tab_" + std::to_string(i)));
+    }
+    return keys;
+  }();
   static wint_t keyEditMsg = UiKeyConfig::GetKey("edit_msg");
   static wint_t keyCancel = UiKeyConfig::GetKey("cancel");
 
@@ -5034,6 +5357,33 @@ void UiModel::KeyHandler(wint_t p_Key)
     std::unique_lock<owned_mutex> lock(m_ModelMutex);
     if (GetImpl().GetSelectMessageActive() || GetImpl().GetEditMessageActive()) return;
     GetImpl().OnKeyTogglePinnedOnly();
+  }
+  else if ((p_Key != 0) && (std::find(keyTabs.begin(), keyTabs.end(), p_Key) != keyTabs.end()))
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeySwitchTab(std::find(keyTabs.begin(), keyTabs.end(), p_Key) - keyTabs.begin());
+  }
+  else if (p_Key == keyToggleTab)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    GetImpl().OnKeyToggleTab();
+  }
+  else if (p_Key == keyToggleSplit)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyToggleSplit();
+  }
+  else if (p_Key == keySwapSplit)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeySwapSplit();
+  }
+  else if (p_Key == keyPreferences)
+  {
+    OnKeyPreferences();
   }
   else if (p_Key == keyOpen)
   {
@@ -5346,6 +5696,89 @@ std::string UiModel::GetListViewLabelLocked()
 {
   nc_assert(m_ModelMutex.owns_lock());
   return GetImpl().GetListViewLabel();
+}
+
+std::vector<std::pair<std::string, std::string>> UiModel::GetTabsLocked()
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetTabs();
+}
+
+std::pair<std::string, std::string> UiModel::GetSplitChatLocked()
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetSplitChat();
+}
+
+bool UiModel::GetSplitEnabledLocked()
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetSplitEnabled();
+}
+
+std::string UiModel::GetProtocolLabelLocked(const std::string& p_ProfileId)
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetProtocolLabel(p_ProfileId);
+}
+
+std::string UiModel::GetContactHandleLocked(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetContactHandle(p_ProfileId, p_ChatId);
+}
+
+std::vector<std::string> UiModel::GetOrderedProfileIds()
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  return GetImpl().GetOrderedProfileIds();
+}
+
+std::string UiModel::GetProfileConnState(const std::string& p_ProfileId)
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  return GetImpl().GetProfileConnState(p_ProfileId);
+}
+
+std::string UiModel::GetProtocolLabel(const std::string& p_ProfileId)
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  return GetImpl().GetProtocolLabel(p_ProfileId);
+}
+
+void UiModel::MoveAccount(const std::string& p_ProfileId, int p_Delta)
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  GetImpl().MoveAccount(p_ProfileId, p_Delta);
+}
+
+bool UiModel::IsProfilePinnedOnly(const std::string& p_ProfileId)
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  return GetImpl().IsProfilePinnedOnly(p_ProfileId);
+}
+
+void UiModel::SetProfilePinnedOnly(const std::string& p_ProfileId, bool p_PinnedOnly)
+{
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  GetImpl().SetProfilePinnedOnly(p_ProfileId, p_PinnedOnly);
+}
+
+void UiModel::OnKeyPreferences()
+{
+  // Pre-req
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+  }
+
+  // Open modal dialog without model mutex held
+  UiDialogParams params(this, "Preferences", 0.75, 0.75);
+  UiPrefsDialog dialog(params);
+  dialog.Run();
+
+  std::unique_lock<owned_mutex> lock(m_ModelMutex);
+  GetImpl().ApplyPreferences();
 }
 
 std::vector<std::pair<std::string, std::string>>& UiModel::GetChatVecLocked()
@@ -5890,7 +6323,7 @@ void UiModel::OnKeyArchiveChat()
     if (GetImpl().GetSelectMessageActive() || GetImpl().GetEditMessageActive()) return;
 
     const std::string& profileId = GetImpl().GetCurrentChat().first;
-    static const bool archiveLocal = UiConfig::GetBool("archive_local");
+    const bool archiveLocal = UiConfig::GetBool("archive_local"); // live: preferences
     hasFeature = archiveLocal || GetImpl().HasProtocolFeature(profileId, FeatureArchiveChat);
   }
 

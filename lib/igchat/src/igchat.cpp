@@ -889,7 +889,7 @@ void IgNewContactsNotify(int p_ConnId, char* p_ChatId, char* p_Name, char* p_Pho
     ContactInfo contactInfo;
     contactInfo.id = std::string(p_ChatId);
     contactInfo.name = std::string(p_Name);
-    contactInfo.phone = std::string(p_Phone);
+    contactInfo.phone = std::string(p_Phone); // instagram: @username
     contactInfo.isSelf = (p_IsSelf == 1);
     contactInfo.isAlias = (p_IsAlias == 1);
 

@@ -137,6 +137,11 @@ void UiHelpView::Draw()
     AppendHelpItem("paste", "Paste", helpItems);
     AppendHelpItem("play_audio", "Voice", helpItems);
     AppendHelpItem("cycle_list_view", "View", helpItems);
+    AppendHelpItem("tab_1", "Tab1-9", helpItems);
+    AppendHelpItem("toggle_tab", "TgTab", helpItems);
+    AppendHelpItem("toggle_split", "Split", helpItems);
+    AppendHelpItem("swap_split", "SwapSplit", helpItems);
+    AppendHelpItem("preferences", "Prefs", helpItems);
     AppendHelpItem("unread_chat", "Unread", helpItems);
     AppendHelpItem("select_mention", "Mention", helpItems);
     AppendHelpItem("find_next", "FindNext", helpItems);

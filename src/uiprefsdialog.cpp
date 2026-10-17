@@ -59,6 +59,12 @@ void UiPrefsDialog::BuildItems()
   header("Media");
   choice("Images and videos", "media_display", false,
          { { "preview", "inline preview" }, { "name", "file name" }, { "path", "full path" } });
+  choice("Preview style", "inline_image_style", false,
+         { { "blocks", "blocks (default)" }, { "ascii", "ASCII" }, { "braille", "Braille dots" },
+           { "half", "half blocks" }, { "quadrants", "quadrant blocks" }, { "sextants", "sextant blocks" },
+           { "stipple", "stipple / shading" }, { "mixed", "mixed symbols" } });
+  choice("Preview colours", "inline_image_color", false,
+         { { "color", "colour" }, { "foreground", "foreground only" }, { "mono", "monochrome" } });
   choice("Preview height", "inline_image_lines", false,
          { { "6", "6 lines" }, { "8", "8 lines" }, { "10", "10 lines" }, { "12", "12 lines" },
            { "16", "16 lines" }, { "20", "20 lines" }, { "24", "24 lines" } });
@@ -75,10 +81,11 @@ void UiPrefsDialog::BuildItems()
   }
 
   header("Chats");
-  choice("Number / @handle in status bar", "show_contact_handle", false, s_OnOff);
+  choice("Number / @handle in chat header", "show_contact_handle", false, s_OnOff);
   choice("Account colours and labels", "protocol_labels", false, s_OnOff);
   choice("Open written-in chats as tabs", "tabs_enabled", false, s_OnOff);
   choice("Archive chats", "archive_local", false, { { "1", "locally only" }, { "0", "on the service" } });
+  choice("Pin chats", "pin_local", false, { { "1", "locally only" }, { "0", "on the service" } });
   choice("Desktop notifications", "desktop_notify_enabled", false, s_OnOff);
   choice("Reactions", "reactions_enabled", false, s_OnOff);
 
@@ -267,9 +274,16 @@ bool UiPrefsDialog::OnTimer()
 
 void UiPrefsDialog::KeyHandler(wint_t p_Key)
 {
+  if (p_Key == 27) // bare Escape, independent of the configured cancel key
+  {
+    m_Result = false;
+    m_Running = false;
+    return;
+  }
+
   // no filter: printable keys are commands here
-  const bool isMoveUp = (p_Key == '-') || (p_Key == KEY_SR);
-  const bool isMoveDown = (p_Key == '+') || (p_Key == KEY_SF);
+  const bool isMoveUp = (p_Key == '-') || (p_Key == (wint_t)UiKeyConfig::GetOffsettedKeyCode(KEY_SR, true));
+  const bool isMoveDown = (p_Key == '+') || (p_Key == (wint_t)UiKeyConfig::GetOffsettedKeyCode(KEY_SF, true));
   if (isMoveUp || isMoveDown)
   {
     if ((m_Index >= 0) && (m_Index < (int)m_PrefItems.size()) && (m_PrefItems.at(m_Index).type == ItemAccount))
@@ -292,7 +306,38 @@ void UiPrefsDialog::KeyHandler(wint_t p_Key)
     return;
   }
 
-  if (StrUtil::IsValidTextKey(p_Key) && (p_Key != ' ')) return;
+  // Function keys use an offset above Unicode; IsValidTextKey also accepts
+  // those values. Dispatch configured commands before rejecting text so that
+  // arrows, paging, resize and custom printable navigation bindings work.
+  static const std::vector<std::string> commands =
+  {
+    "cancel", "quit", "other_commands_help", "left", "right", "ok",
+    "prev_page", "next_page", "down", "up", "end", "home",
+    "terminal_focus_in", "terminal_focus_out", "terminal_resize",
+  };
+  for (const auto& command : commands)
+  {
+    if (p_Key != (wint_t)UiKeyConfig::GetKey(command)) continue;
+
+    const int oldIndex = m_Index;
+    UiListDialog::KeyHandler(p_Key);
+    if (!m_PrefItems.empty() && (m_PrefItems.at(m_Index).type == ItemHeader))
+    {
+      int direction = (m_Index < oldIndex) ? -1 : 1;
+      if (p_Key == (wint_t)UiKeyConfig::GetKey("home")) direction = 1;
+      while (m_PrefItems.at(m_Index).type == ItemHeader)
+      {
+        const int next = m_Index + direction;
+        if ((next < 0) || (next >= (int)m_PrefItems.size()))
+        {
+          direction = -direction;
+        }
+        m_Index += direction;
+      }
+      Draw();
+    }
+    return;
+  }
 
   if (p_Key == ' ')
   {
@@ -300,6 +345,4 @@ void UiPrefsDialog::KeyHandler(wint_t p_Key)
     Draw();
     return;
   }
-
-  UiListDialog::KeyHandler(p_Key);
 }

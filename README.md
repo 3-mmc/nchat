@@ -509,7 +509,7 @@ This configuration file holds general user interface settings. Default content:
     linefeed_on_enter=1
     link_open_command=
     list_enabled=1
-    list_width=14
+    list_width=22
     listdialog_show_filter=1
     mark_read_any_chat=0
     mark_read_on_view=1
@@ -754,7 +754,9 @@ Specifies whether to display chat list. Controlled by Ctrl-l in run-time.
 
 ### list_width
 
-Specifies width of chat list.
+Specifies the preferred width of the chat list (default 22 columns). The sidebar
+narrows automatically in small terminals. Adjust it with Alt-, and Alt-. at
+run-time.
 
 ### listdialog_show_filter
 
@@ -821,7 +823,7 @@ WhatsApp when the terminal is not active.
 
 ### phone_number_indicator
 
-Specifies status bar text to indicate phone number of the current chat is
+Specifies conversation header text to indicate phone number of the current chat is
 available. This field may contain `%1` which will be replaced with the actual
 phone number of the contact. Other examples: `🎧`
 
@@ -923,7 +925,7 @@ This configuration file holds user interface key bindings. Default content:
     cancel=KEY_CTRLC
     clear=KEY_CTRLC
     copy=\33\143
-    cut=\33\170
+    cut=\33\30
     decrease_list_width=\33\54
     delete=KEY_DC
     delete_chat=\33\144
@@ -955,7 +957,7 @@ This configuration file holds user interface key bindings. Default content:
     open_link=KEY_CTRLW
     open_msg=\33\167
     other_commands_help=KEY_CTRLO
-    paste=\33\166
+    paste=\33\26
     pin=\33\160
     prev_chat=KEY_BTAB
     prev_page=KEY_PPAGE
@@ -1167,7 +1169,7 @@ Specifies which Telegram Markdown version to use (default 1).
 
 ### profile_display_name
 
-Specifies an optional short/display name in the status bar when using nchat
+Specifies an optional short/display name in the conversation header when using nchat
 with multiple profiles. The default profile name is `Telegram` or
 `Telegram_+nnnnn` (when more than one Telegram profile is set up) if this
 setting is not specified.
@@ -1181,7 +1183,7 @@ content:
 
 ### profile_display_name
 
-Specifies an optional short/display name in the status bar when using nchat
+Specifies an optional short/display name in the conversation header when using nchat
 with multiple profiles. The default profile name is `WhatsAppMd` or
 `WhatsAppMd_+nnnnn` (when more than one WhatsAppMd profile is set up) if this
 setting is not specified.
@@ -1195,7 +1197,7 @@ content:
 
 ### profile_display_name
 
-Specifies an optional short/display name in the status bar when using nchat
+Specifies an optional short/display name in the conversation header when using nchat
 with multiple profiles. The default profile name is `Signal` or
 `Signal_+nnnnn` (when more than one Signal profile is set up) if this
 setting is not specified.

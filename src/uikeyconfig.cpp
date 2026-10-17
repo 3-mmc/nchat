@@ -218,9 +218,9 @@ void UiKeyConfig::Init(bool p_MapKeys)
 #endif
     { "edit_msg", "KEY_CTRLZ" },
     { "backward_kill_word", "\\33\\177" }, // alt/opt-backspace
-    { "cut", "\\33\\170" }, // alt/opt-x
+    { "cut", "\\33\\30" }, // ctrl-alt/opt-x (alt-x swaps split panes)
     { "copy", "\\33\\143" }, // alt/opt-c
-    { "paste", "\\33\\166" }, // alt/opt-v
+    { "paste", "\\33\\26" }, // ctrl-alt/opt-v (alt-v toggles split panes)
     { "ext_call", "\\33\\164" }, // alt/opt-t
     { "ext_edit", "\\33\\145" }, // alt/opt-e
     { "react", "\\33\\163" }, // alt/opt-s
@@ -256,6 +256,7 @@ void UiKeyConfig::Init(bool p_MapKeys)
     { "toggle_tab", "\\33\\60" }, // alt/opt-0
     { "toggle_split", "\\33\\166" }, // alt/opt-v
     { "swap_split", "\\33\\170" }, // alt/opt-x
+    { "focus_pane", "KEY_F6" },
     { "preferences", "\\33\\147" }, // alt/opt-g
     { "open", "KEY_CTRLV" },
     { "open_link", "KEY_CTRLW" },

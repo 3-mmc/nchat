@@ -70,6 +70,11 @@ void UiListView::Draw()
     unreads.push_back(isUnread);
   }
 
+  const std::wstring title = StrUtil::TrimPadWString(L"Chats", std::max(0, m_W - 2));
+  wattron(m_Win, attribute | colorPair | A_BOLD);
+  mvwaddnwstr(m_Win, 0, 1, title.c_str(), title.size());
+  wattroff(m_Win, attribute | colorPair | A_BOLD);
+  wrefresh(m_Win);
   werase(m_PaddedWin);
   wbkgd(m_PaddedWin, attribute | colorPair | ' ');
 
@@ -108,6 +113,10 @@ void UiListView::Draw()
       if (!emojiEnabled)
       {
         name = StrUtil::Textize(name);
+      }
+      if (m_Model->GetChatIsPinnedLocked(p_ChatVec[i].first, p_ChatVec[i].second))
+      {
+        name = UiConfig::GetStr("pinned_indicator") + " " + name;
       }
 
       // coloured account marker in front of each chat when several accounts are set up

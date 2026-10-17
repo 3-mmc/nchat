@@ -7,6 +7,7 @@
 
 #include "uihistoryview.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 #include "appconfig.h"
@@ -78,14 +79,11 @@ void UiHistoryView::Draw()
   static std::wstring quoteIndicator = L"> ";
   static std::wstring imageRowIndicator = L"\uF8FF"; // placeholder line for an inline image row
 
-  // the split pane shows the docked chat, read-only (no selection / scrolling)
+  // Selection and scrolling follow focus; F6 makes the other pane active.
   const bool isSplitPane = (m_Pane == PaneSplit);
   std::pair<std::string, std::string> currentChat =
     isSplitPane ? m_Model->GetSplitChatLocked() : m_Model->GetCurrentChatLocked();
-  if (m_Pane != PaneSingle)
-  {
-    DrawPaneHeader(currentChat);
-  }
+  DrawPaneHeader(currentChat);
 
   const bool emojiEnabled = m_Model->GetEmojiEnabledLocked();
   static const bool developerMode = AppUtil::GetDeveloperMode();
@@ -490,26 +488,98 @@ void UiHistoryView::Draw()
 
 void UiHistoryView::DrawPaneHeader(const std::pair<std::string, std::string>& p_Chat)
 {
-  // chat name on the padding row above the pane: bold for the active pane
-  std::string name = m_Model->GetContactListNameLocked(p_Chat.first, p_Chat.second, true /*p_AllowId*/,
-                                                       true /*p_AllowAlias*/);
-  if (!m_Model->GetEmojiEnabledLocked())
+  // Identity lives once above each conversation; tabs remain compact navigation.
+  static const int attribute = UiColorConfig::GetAttribute("history_text_attr");
+  static const int colorPair = UiColorConfig::GetColorPair("history_text_recv_color");
+  const attr_t baseAttr = attribute | colorPair;
+  const int hpad = (m_X == 0) ? 0 : 1;
+  const int endX = std::max(hpad, m_W - hpad);
+  const bool isActive = (m_Pane != PaneSplit);
+
+  werase(m_Win);
+  wbkgd(m_Win, baseAttr | ' ');
+  if (p_Chat.first.empty() && p_Chat.second.empty())
   {
-    name = StrUtil::Textize(name);
+    wrefresh(m_Win);
+    return;
   }
 
-  const bool isActive = (m_Pane == PaneMain);
-  const int hpad = (m_X == 0) ? 0 : 1;
-  const std::string label = std::string(isActive ? "\xe2\x96\xb8 " : "  ") + name + // ▸
-    (m_Model->IsMultipleProfilesLocked() ? "  " + m_Model->GetProtocolLabelLocked(p_Chat.first) : "");
-  std::wstring wlabel = StrUtil::TrimPadWString(StrUtil::ToWString(label), std::max(0, m_W - (2 * hpad)));
+  std::string name = m_Model->GetContactListNameLocked(p_Chat.first, p_Chat.second, true /*p_AllowId*/,
+                                                       true /*p_AllowAlias*/);
+  if (!m_Model->GetEmojiEnabledLocked()) name = StrUtil::Textize(name);
 
-  static int attributeTextNormal = UiColorConfig::GetAttribute("history_text_attr");
-  static int colorPairTextRecv = UiColorConfig::GetColorPair("history_text_recv_color");
-  const int attr = isActive ? (A_BOLD | A_UNDERLINE) : A_DIM;
-  wattron(m_Win, attributeTextNormal | colorPairTextRecv | attr);
-  mvwaddnwstr(m_Win, 0, hpad, wlabel.c_str(), wlabel.size());
-  wattroff(m_Win, attributeTextNormal | colorPairTextRecv | attr);
+  struct Segment
+  {
+    std::wstring text;
+    attr_t attr;
+  };
+  std::vector<Segment> left;
+  const std::wstring prefix = (m_Pane == PaneMain) ? L"\u25b8 " : L"";
+  const std::wstring wname = StrUtil::ToWString(name);
+  left.push_back({ prefix + wname, baseAttr | (isActive ? A_BOLD : A_DIM) });
+
+  std::string handle;
+  if (UiConfig::GetBool("show_contact_handle"))
+  {
+    handle = m_Model->GetContactHandleLocked(p_Chat.first, p_Chat.second);
+    if (!handle.empty()) left.push_back({ L"  " + StrUtil::ToWString(handle), baseAttr | A_ITALIC });
+  }
+
+  const std::string phoneIndicator = UiConfig::GetStr("phone_number_indicator");
+  if (!phoneIndicator.empty())
+  {
+    std::string indicator = phoneIndicator;
+    StrUtil::ReplaceString(indicator, "%1", m_Model->GetContactPhoneLocked(p_Chat.first, p_Chat.second));
+    left.push_back({ L" " + StrUtil::ToWString(indicator), baseAttr });
+  }
+
+  Segment account = { L"", baseAttr };
+  if (UiConfig::GetBool("protocol_labels") && m_Model->IsMultipleProfilesLocked())
+  {
+    const int protocolPair = UiColorConfig::GetProtocolColorPair(p_Chat.first);
+    account = { L" " + StrUtil::ToWString(m_Model->GetProtocolLabelLocked(p_Chat.first)) + L" ",
+                protocolPair ? (A_REVERSE | A_BOLD | protocolPair) : (baseAttr | A_BOLD) };
+  }
+  else
+  {
+    account.text = StrUtil::ToWString(m_Model->GetProfileSuffixLocked(p_Chat.first));
+  }
+  const int accountX = std::max(hpad, endX - StrUtil::WStringWidth(account.text));
+  const int leftEnd = std::max(hpad, accountX - (account.text.empty() ? 0 : 1));
+  // Keep useful identity text in narrow panes rather than fragments of a number.
+  if (!handle.empty())
+  {
+    const int handleWidth = StrUtil::WStringWidth(left.at(1).text);
+    const int minNameWidth = std::min(8, StrUtil::WStringWidth(left.front().text));
+    if ((handleWidth + minNameWidth) > (leftEnd - hpad))
+    {
+      left.erase(left.begin() + 1);
+    }
+  }
+  int detailWidth = 0;
+  for (size_t i = 1; i < left.size(); ++i) detailWidth += StrUtil::WStringWidth(left.at(i).text);
+  const int nameWidth = std::max(1, leftEnd - hpad - detailWidth);
+  if (StrUtil::WStringWidth(left.front().text) > nameWidth)
+  {
+    left.front().text = StrUtil::TrimPadWString(left.front().text, nameWidth - 1) + L"\u2026";
+  }
+
+  auto draw = [&](const Segment& p_Segment, int p_X, int p_End)
+  {
+    if (p_X >= p_End) return p_X;
+    std::wstring text = p_Segment.text;
+    if (StrUtil::WStringWidth(text) > (p_End - p_X))
+    {
+      text = StrUtil::TrimPadWString(text, p_End - p_X);
+    }
+    wattrset(m_Win, p_Segment.attr);
+    mvwaddnwstr(m_Win, 0, p_X, text.c_str(), text.size());
+    return p_X + StrUtil::WStringWidth(text);
+  };
+  int x = hpad;
+  for (const auto& segment : left) x = draw(segment, x, leftEnd);
+  draw(account, accountX, endX);
+  wattrset(m_Win, baseAttr);
   wrefresh(m_Win);
 }
 

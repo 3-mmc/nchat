@@ -1,6 +1,6 @@
 // uiimagepreview.h
 //
-// Inline image previews in the history view, rendered as colour block symbols
+// Inline image previews in the history view, rendered as configurable symbols
 // by chafa and mapped onto the terminal's 256-colour palette.
 //
 // nchat is distributed under the MIT license, see LICENSE for details.
@@ -16,6 +16,7 @@ struct UiImageCell
 {
   wchar_t ch = L' ';
   int pair = 0;
+  attr_t attr = A_NORMAL;
 };
 
 typedef std::vector<std::vector<UiImageCell>> UiImageRows;

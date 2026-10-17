@@ -17,8 +17,8 @@ public:
   enum Pane
   {
     PaneSingle = 0,
-    PaneMain, // split view: current chat (left)
-    PaneSplit, // split view: docked chat (right)
+    PaneMain, // split view: focused conversation, on either side
+    PaneSplit, // split view: other conversation
   };
 
   UiHistoryView(const UiViewParams& p_Params, Pane p_Pane = PaneSingle);

@@ -45,6 +45,7 @@ public:
   int GetEntryWidth();
   int GetScreenWidth();
   int GetScreenHeight();
+  bool HasSplitView();
   void DecreaseListWidth();
   void IncreaseListWidth();
 
@@ -66,6 +67,8 @@ private:
   std::shared_ptr<UiHistoryView> m_UiHistoryView;
   std::shared_ptr<UiListBorderView> m_UiSplitBorderView; // split view only
   std::shared_ptr<UiHistoryView> m_UiSplitHistoryView; // split view only
+  std::shared_ptr<UiEntryView> m_UiSplitEntryView;
+  std::shared_ptr<UiStatusView> m_UiSplitStatusView;
 
   bool m_EmojiEnabled = true;
   bool m_TopEnabled = true;
@@ -74,7 +77,7 @@ private:
   bool m_StatusEnabled = true;
   bool m_ListEnabled = true;
   const bool m_HistoryEnabled = true;
-  int m_ListWidth = 14;
+  int m_ListWidth = 22;
   int m_EntryHeight = 4;
 
   friend class UiModel;

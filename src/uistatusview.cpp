@@ -7,7 +7,7 @@
 
 #include "uistatusview.h"
 
-#include <vector>
+#include <algorithm>
 
 #include "apputil.h"
 #include "strutil.h"
@@ -16,8 +16,9 @@
 #include "uihelpview.h"
 #include "uimodel.h"
 
-UiStatusView::UiStatusView(const UiViewParams& p_Params)
+UiStatusView::UiStatusView(const UiViewParams& p_Params, bool p_IsSplit)
   : UiViewBase(p_Params)
+  , m_IsSplit(p_IsSplit)
 {
 }
 
@@ -28,14 +29,7 @@ void UiStatusView::Draw()
 
   curs_set(0);
 
-  std::pair<std::string, std::string>& currentChat = m_Model->GetCurrentChatLocked();
-  std::string name = m_Model->GetContactListNameLocked(currentChat.first, currentChat.second, true /*p_AllowId*/,
-                                                       true /*p_AllowAlias*/);
-  if (!m_Model->GetEmojiEnabledLocked())
-  {
-    name = StrUtil::Textize(name);
-  }
-
+  const auto currentChat = m_IsSplit ? m_Model->GetSplitChatLocked() : m_Model->GetCurrentChatLocked();
   int statusVPad = 1;
   static int colorPair = UiColorConfig::GetColorPair("status_color");
   static int attribute = UiColorConfig::GetAttribute("status_attr");
@@ -44,65 +38,10 @@ void UiStatusView::Draw()
   wbkgd(m_Win, attribute | colorPair | ' ');
   wattron(m_Win, attribute | colorPair);
 
-  // segments with their own attributes: name, account label, handle, chat status, send hint
-  struct Segment
+  std::wstring text;
+  if (!currentChat.first.empty() || !currentChat.second.empty())
   {
-    std::wstring text;
-    attr_t attr;
-  };
-  std::vector<Segment> segments;
-  const attr_t baseAttr = attribute | colorPair;
-
-  if (currentChat.first.empty() && currentChat.second.empty())
-  {
-    // Empty status bar until current chat is set
-  }
-  else
-  {
-    segments.push_back({ std::wstring(statusVPad, ' ') + StrUtil::ToWString(name).substr(0, m_W / 2), baseAttr });
-
-    const bool protocolLabels = UiConfig::GetBool("protocol_labels");
-    if (protocolLabels && m_Model->IsMultipleProfilesLocked())
-    {
-      // coloured account chip (the bar's reverse attribute turns the protocol colour into background)
-      const int protocolPair = UiColorConfig::GetProtocolColorPair(currentChat.first);
-      segments.push_back({ L" ", baseAttr });
-      segments.push_back({ L" " + StrUtil::ToWString(m_Model->GetProtocolLabelLocked(currentChat.first)) + L" ",
-                           (protocolPair != 0) ? (A_REVERSE | A_BOLD | protocolPair) : (baseAttr | A_BOLD) });
-    }
-    else
-    {
-      segments.push_back({ StrUtil::ToWString(m_Model->GetProfileSuffixLocked(currentChat.first)), baseAttr });
-    }
-
-    if (UiConfig::GetBool("show_contact_handle"))
-    {
-      const std::string handle = m_Model->GetContactHandleLocked(currentChat.first, currentChat.second);
-      if (!handle.empty())
-      {
-        segments.push_back({ L"  " + StrUtil::ToWString(handle), baseAttr | A_ITALIC });
-      }
-    }
-
     std::wstring wextra = StrUtil::ToWString(m_Model->GetChatStatusLocked(currentChat.first, currentChat.second));
-
-    static const std::string phoneNumberIndicator = UiConfig::GetStr("phone_number_indicator");
-    if (!phoneNumberIndicator.empty())
-    {
-      static std::string placeholder = "%1";
-      static const bool isDynamicIndicator = (phoneNumberIndicator.find(placeholder) != std::string::npos);
-      if (isDynamicIndicator)
-      {
-        std::string dynamicIndicator = phoneNumberIndicator;
-        std::string phone = m_Model->GetContactPhoneLocked(currentChat.first, currentChat.second);
-        StrUtil::ReplaceString(dynamicIndicator, placeholder, phone);
-        wextra += L" " + StrUtil::ToWString(dynamicIndicator);
-      }
-      else
-      {
-        wextra += L" " + StrUtil::ToWString(phoneNumberIndicator);
-      }
-    }
 
     static const bool developerMode = AppUtil::GetDeveloperMode();
     if (developerMode)
@@ -117,7 +56,7 @@ void UiStatusView::Draw()
       }
     }
 
-    segments.push_back({ wextra, baseAttr });
+    text = std::wstring(statusVPad, L' ') + wextra;
   }
 
   // send / reply / save hint, right-aligned (view filter is shown above the chat list)
@@ -127,37 +66,18 @@ void UiStatusView::Draw()
   {
     const char* action = m_Model->GetEditMessageActiveLocked() ? "Save"
       : (m_Model->GetSelectMessageActiveLocked() ? "Reply" : "Send");
-    whint = StrUtil::ToWString(sendKey + " " + action) + L" ";
-    if ((StrUtil::WStringWidth(whint) + 4) >= m_W)
-    {
-      whint.clear();
-    }
+    whint = StrUtil::ToWString(m_IsSplit ? (UiHelpView::GetKeyDisplay("focus_pane") + " Focus") :
+                                  (sendKey + " " + action)) + L" ";
+    if ((StrUtil::WStringWidth(whint) + 4) >= m_W) whint.clear();
   }
 
-  const int maxX = m_W - StrUtil::WStringWidth(whint);
-  int x = 0;
-  for (const auto& segment : segments)
+  const int hintX = std::max(0, m_W - StrUtil::WStringWidth(whint));
+  if (StrUtil::WStringWidth(text) > hintX)
   {
-    if (x >= maxX) break;
-
-    std::wstring wtext = segment.text;
-    if ((x + StrUtil::WStringWidth(wtext)) > maxX)
-    {
-      wtext = StrUtil::TrimPadWString(wtext, maxX - x);
-    }
-
-    wattroff(m_Win, baseAttr);
-    wattron(m_Win, segment.attr);
-    mvwaddnwstr(m_Win, 0, x, wtext.c_str(), wtext.size());
-    wattroff(m_Win, segment.attr);
-    wattron(m_Win, baseAttr);
-    x += StrUtil::WStringWidth(wtext);
+    text = StrUtil::TrimPadWString(text, std::max(0, hintX - 1));
   }
-
-  if (!whint.empty())
-  {
-    mvwaddnwstr(m_Win, 0, maxX, whint.c_str(), whint.size());
-  }
+  mvwaddnwstr(m_Win, 0, 0, text.c_str(), text.size());
+  if (!whint.empty()) mvwaddnwstr(m_Win, 0, hintX, whint.c_str(), whint.size());
 
   wattroff(m_Win, attribute | colorPair);
   wrefresh(m_Win);

@@ -48,6 +48,8 @@
 // ---------------------------------------------------------------------
 
 const std::pair<std::string, std::string> UiModel::Impl::s_ChatNone;
+static const std::string s_ArchivedView = "Archived";
+static const std::string s_PinnedView = "Pinned";
 
 UiModel::Impl::Impl(UiModel* p_UiModel)
 {
@@ -62,6 +64,7 @@ void UiModel::Impl::Init()
 {
   m_View->Init();
   LoadLocalArchive();
+  LoadLocalPins();
   LoadTabs();
   ApplyPreferences();
 }
@@ -186,6 +189,7 @@ void UiModel::Impl::OnKeySendMsg()
 
 void UiModel::Impl::SendMessage()
 {
+  if (m_CurrentChat == s_ChatNone) return;
   std::string profileId = m_CurrentChat.first;
   std::string chatId = m_CurrentChat.second;
   std::wstring& entryStr = m_EntryStr[profileId][chatId];
@@ -1041,11 +1045,19 @@ void UiModel::Impl::OnKeyArchiveChat()
 void UiModel::Impl::OnKeyPinChat()
 {
   AnyUserKeyInput();
+  if (m_CurrentChat == s_ChatNone) return;
 
   const std::string& profileId = m_CurrentChat.first;
   const std::string& chatId = m_CurrentChat.second;
 
-  bool isPinned = m_ChatInfos[profileId][chatId].isPinned;
+  const bool isPinned = GetChatIsPinned(profileId, chatId);
+  if (UiConfig::GetBool("pin_local"))
+  {
+    m_LocalPins[m_CurrentChat] = !isPinned;
+    SaveLocalPins();
+    RebuildChatList();
+    return;
+  }
   std::shared_ptr<PinChatRequest> pinChatRequest = std::make_shared<PinChatRequest>();
   pinChatRequest->chatId = chatId;
   pinChatRequest->isPinned = !isPinned;
@@ -1755,8 +1767,23 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
 
             m_ChatInfos[profileId][chatInfo.id] = chatInfo;
 
-            if (chatInfo.isArchived) continue;
-            if (IsChatListFiltered(profileId, chatInfo.id)) continue;
+            if (chatInfo.isArchived || IsChatListFiltered(profileId, chatInfo.id))
+            {
+              // A fresh snapshot may change a service pin used as the local fallback.
+              if (m_ChatSet[profileId].erase(chatInfo.id))
+              {
+                const auto chat = std::make_pair(profileId, chatInfo.id);
+                m_ChatVec.erase(std::remove(m_ChatVec.begin(), m_ChatVec.end(), chat), m_ChatVec.end());
+                if (m_CurrentChat == chat)
+                {
+                  m_CurrentChat = s_ChatNone;
+                  m_CurrentChatIndex = -1;
+                  SetSelectMessageActive(false);
+                  OnCurrentChatChanged();
+                }
+              }
+              continue;
+            }
 
             if (m_ChatSet[profileId].insert(chatInfo.id).second)
             {
@@ -2145,6 +2172,13 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         {
           std::string chatId = deleteChatNotify->chatId;
           LOG_TRACE("chat deleted %s", chatId.c_str());
+          if (m_SplitChat == std::make_pair(profileId, chatId))
+          {
+            m_SplitEnabled = false;
+            m_SplitChat = s_ChatNone;
+            m_SplitFocusRight = false;
+            ReinitView();
+          }
 
           for (auto it = m_ChatVec.begin(); it != m_ChatVec.end(); /* incremented in loop */)
           {
@@ -2160,10 +2194,13 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
           }
 
           m_ChatInfos[profileId].erase(chatId);
+          if (m_LocalPins.erase(std::make_pair(profileId, chatId))) SaveLocalPins();
 
           if ((m_CurrentChat.first == profileId) && (m_CurrentChat.second == chatId))
           {
-            m_CurrentChat = m_ChatVec.at(NumUtil::Bound(0, m_CurrentChatIndex, ((int)m_ChatVec.size() - 1)));
+            m_CurrentChat = m_ChatVec.empty() ? s_ChatNone :
+              m_ChatVec.at(NumUtil::Bound(0, m_CurrentChatIndex, ((int)m_ChatVec.size() - 1)));
+            if (m_ChatVec.empty()) m_CurrentChatIndex = -1;
             SortChats();
             OnCurrentChatChanged();
             SetSelectMessageActive(false);
@@ -2186,6 +2223,15 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         if (!chatInfos.count(chatId)) return;
 
         LOG_TRACE("chat moved %s to %s", chatId.c_str(), newChatId.c_str());
+        if (m_SplitChat == std::make_pair(profileId, chatId)) m_SplitChat.second = newChatId;
+        if (m_LastCurrentChat == std::make_pair(profileId, chatId)) m_LastCurrentChat.second = newChatId;
+        const auto oldPin = m_LocalPins.find(std::make_pair(profileId, chatId));
+        if ((oldPin != m_LocalPins.end()) && (chatId != newChatId))
+        {
+          m_LocalPins.emplace(std::make_pair(profileId, newChatId), oldPin->second);
+          m_LocalPins.erase(oldPin);
+          SaveLocalPins();
+        }
 
         // replace old chat with new chat, merging into new chat if already present
         const ChatInfo oldChatInfo = chatInfos[chatId];
@@ -2251,8 +2297,8 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
           SetSelectMessageActive(false);
         }
 
-        SortChats();
-        OnCurrentChatChanged();
+        RebuildChatList();
+        ReinitView();
       }
       break;
 
@@ -2293,7 +2339,7 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
             m_ChatVec.push_back(std::make_pair(profileId, chatId));
           }
         }
-        else if (IsChatPinFiltered(profileId, chatId) && m_ChatSet[profileId].count(chatId))
+        else if (IsChatListFiltered(profileId, chatId) && m_ChatSet[profileId].count(chatId))
         {
           m_ChatSet[profileId].erase(chatId);
           m_ChatVec.erase(
@@ -2551,8 +2597,9 @@ void UiModel::Impl::SortChats()
     const ChatInfo& rhsChatInfo = m_ChatInfos[rhs.first][rhs.second];
 
     // pinned are listed first
-    if (lhsChatInfo.isPinned > rhsChatInfo.isPinned) return true;
-    if (lhsChatInfo.isPinned < rhsChatInfo.isPinned) return false;
+    const bool lhsPinned = GetChatIsPinned(lhs.first, lhs.second);
+    const bool rhsPinned = GetChatIsPinned(rhs.first, rhs.second);
+    if (lhsPinned != rhsPinned) return lhsPinned;
 
     if (!mutedPositionByTimestamp)
     {
@@ -2625,7 +2672,7 @@ void UiModel::Impl::UpdateChatInfoLastMessageTime(const std::string& p_ProfileId
   std::unordered_map<std::string, ChatInfo>& profileChatInfos = m_ChatInfos[p_ProfileId];
   if (profileChatInfos.count(p_ChatId))
   {
-    if (!profileChatInfos[p_ChatId].isPinned)
+    if (UiConfig::GetBool("pin_local") || !profileChatInfos[p_ChatId].isPinned)
     {
       profileChatInfos[p_ChatId].lastMessageTime = lastMessageTimeSent;
     }
@@ -2814,6 +2861,20 @@ bool UiModel::Impl::GetChatIsUnread(const std::string& p_ProfileId, const std::s
   return indicateUnread; // @todo: handle isUnreadMention
 }
 
+bool UiModel::Impl::GetChatIsPinned(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  if (UiConfig::GetBool("pin_local"))
+  {
+    const auto local = m_LocalPins.find(std::make_pair(p_ProfileId, p_ChatId));
+    if (local != m_LocalPins.end()) return local->second;
+  }
+
+  const auto profile = m_ChatInfos.find(p_ProfileId);
+  if (profile == m_ChatInfos.end()) return false;
+  const auto chat = profile->second.find(p_ChatId);
+  return (chat != profile->second.end()) && chat->second.isPinned;
+}
+
 std::string UiModel::Impl::GetChatStatus(const std::string& p_ProfileId, const std::string& p_ChatId)
 {
   std::string chatStatus;
@@ -2895,15 +2956,18 @@ std::string UiModel::Impl::GetChatStatus(const std::string& p_ProfileId, const s
     }
   }
 
-  if (chatInfo.isPinned)
+  if (GetChatIsPinned(p_ProfileId, p_ChatId))
   {
+    const bool local = UiConfig::GetBool("pin_local") &&
+      (m_LocalPins.count(std::make_pair(p_ProfileId, p_ChatId)) > 0);
+    const std::string pinStatus = local ? "pinned locally" : "pinned";
     if (chatStatus.empty())
     {
-      chatStatus = "pinned";
+      chatStatus = pinStatus;
     }
     else
     {
-      chatStatus = chatStatus + ", pinned";
+      chatStatus = chatStatus + ", " + pinStatus;
     }
   }
 
@@ -2919,6 +2983,27 @@ std::string UiModel::Impl::GetChatStatus(const std::string& p_ProfileId, const s
 
 void UiModel::Impl::OnCurrentChatChanged()
 {
+  // Navigating to the other visible chat focuses its existing pane rather than
+  // replacing the focused pane with a duplicate conversation.
+  if (m_SplitEnabled && (m_CurrentChat == m_SplitChat))
+  {
+    const auto oldProfile = m_ChatInfos.find(m_LastCurrentChat.first);
+    const bool oldChatExists = (oldProfile != m_ChatInfos.end()) &&
+      (oldProfile->second.count(m_LastCurrentChat.second) > 0);
+    if ((m_LastCurrentChat != s_ChatNone) && (m_LastCurrentChat != m_CurrentChat) && oldChatExists)
+    {
+      m_SplitChat = m_LastCurrentChat;
+      m_SplitFocusRight = !m_SplitFocusRight;
+    }
+    else
+    {
+      m_SplitEnabled = false;
+      m_SplitChat = s_ChatNone;
+      m_SplitFocusRight = false;
+    }
+    ReinitView();
+  }
+  m_LastCurrentChat = m_CurrentChat;
   LOG_TRACE("current chat %s %s", m_CurrentChat.first.c_str(), m_CurrentChat.second.c_str());
   SetHistoryInteraction(false);
   UpdateList();
@@ -3178,14 +3263,16 @@ void UiModel::Impl::UpdateEntry()
   m_View->SetEntryDirty(true);
 }
 
-std::wstring& UiModel::Impl::GetEntryStr()
+std::wstring& UiModel::Impl::GetEntryStr(bool p_Split)
 {
-  return m_EntryStr[m_CurrentChat.first][m_CurrentChat.second];
+  const auto& chat = p_Split ? m_SplitChat : m_CurrentChat;
+  return m_EntryStr[chat.first][chat.second];
 }
 
-int& UiModel::Impl::GetEntryPos()
+int& UiModel::Impl::GetEntryPos(bool p_Split)
 {
-  return m_EntryPos[m_CurrentChat.first][m_CurrentChat.second];
+  const auto& chat = p_Split ? m_SplitChat : m_CurrentChat;
+  return m_EntryPos[chat.first][chat.second];
 }
 
 std::vector<std::pair<std::string, std::string>>& UiModel::Impl::GetChatVec()
@@ -4451,11 +4538,33 @@ bool UiModel::Impl::IsChatPinFiltered(const std::string& p_ProfileId, const std:
   }
   if (!isPinnedOnly) return false;
 
-  auto it = m_ChatInfos[p_ProfileId].find(p_ChatId);
-  return (it == m_ChatInfos[p_ProfileId].end()) || !it->second.isPinned;
+  return !GetChatIsPinned(p_ProfileId, p_ChatId);
 }
 
-static const std::string s_ArchivedView = "Archived";
+void UiModel::Impl::LoadLocalPins()
+{
+  // One "0|1 profileId chatId" per line. Explicit false values override service pins.
+  const std::string path = FileUtil::GetApplicationDir() + "/local_pins.txt";
+  if (!FileUtil::Exists(path)) return;
+
+  for (const auto& line : StrUtil::Split(FileUtil::ReadFile(path), '\n'))
+  {
+    if ((line.size() < 5) || ((line[0] != '0') && (line[0] != '1')) || (line[1] != ' ')) continue;
+    const size_t sep = line.find(' ', 2);
+    if ((sep == std::string::npos) || (sep == 2) || (sep + 1 == line.size())) continue;
+    m_LocalPins[std::make_pair(line.substr(2, sep - 2), line.substr(sep + 1))] = (line[0] == '1');
+  }
+}
+
+void UiModel::Impl::SaveLocalPins()
+{
+  std::string data;
+  for (const auto& pin : m_LocalPins)
+  {
+    data += std::string(pin.second ? "1 " : "0 ") + pin.first.first + " " + pin.first.second + "\n";
+  }
+  FileUtil::WriteFile(FileUtil::GetApplicationDir() + "/local_pins.txt", data);
+}
 
 bool UiModel::Impl::IsChatLocalArchived(const std::string& p_ProfileId, const std::string& p_ChatId)
 {
@@ -4495,6 +4604,7 @@ bool UiModel::Impl::IsChatListFiltered(const std::string& p_ProfileId, const std
   if (m_ListViewProtocol == s_ArchivedView) return !isLocalArchived;
 
   if (isLocalArchived) return true;
+  if (m_ListViewProtocol == s_PinnedView) return !GetChatIsPinned(p_ProfileId, p_ChatId);
 
   if (!m_ListViewProtocol.empty() && (p_ProfileId.substr(0, p_ProfileId.find('_')) != m_ListViewProtocol))
   {
@@ -4594,8 +4704,8 @@ void UiModel::Impl::OnKeyCycleListView()
     }
   }
 
-  // cycle: all -> each protocol (if several) -> archived (if any locally archived) -> all
-  std::vector<std::string> views = { "" };
+  // cycle: all -> pinned -> each protocol (if several) -> archived -> all
+  std::vector<std::string> views = { "", s_PinnedView };
   if (protocolNames.size() > 1)
   {
     views.insert(views.end(), protocolNames.begin(), protocolNames.end());
@@ -4628,7 +4738,7 @@ std::string UiModel::Impl::GetListViewLabel()
     label = GetProtocolLabel(m_ListViewProtocol);
   }
 
-  if (hasPinnedOnlyProfiles && !m_PinnedOnlyActive)
+  if (hasPinnedOnlyProfiles && !m_PinnedOnlyActive && (m_ListViewProtocol != s_PinnedView))
   {
     label += label.empty() ? "all chats" : " +all";
   }
@@ -4741,11 +4851,6 @@ void UiModel::Impl::OnKeySwitchTab(int p_Index)
   const std::pair<std::string, std::string> chat = m_Tabs.at(p_Index);
   if (chat == m_CurrentChat) return;
 
-  if (m_SplitEnabled && (chat == m_SplitChat))
-  {
-    m_SplitChat = m_CurrentChat; // keep both chats on screen, swapped
-  }
-
   SwitchToChat(chat);
   UpdateTop();
 }
@@ -4774,7 +4879,8 @@ void UiModel::Impl::OnKeyToggleTab()
 
 bool UiModel::Impl::GetSplitEnabled()
 {
-  return m_SplitEnabled && (m_SplitChat != s_ChatNone);
+  return m_SplitEnabled && (m_CurrentChat != s_ChatNone) &&
+    (m_SplitChat != s_ChatNone) && (m_SplitChat != m_CurrentChat);
 }
 
 std::pair<std::string, std::string> UiModel::Impl::GetSplitChat()
@@ -4782,34 +4888,64 @@ std::pair<std::string, std::string> UiModel::Impl::GetSplitChat()
   return m_SplitChat;
 }
 
+bool UiModel::Impl::GetSplitFocusRight()
+{
+  return m_SplitFocusRight;
+}
+
+void UiModel::Impl::OnKeyFocusPane()
+{
+  if (!GetSplitEnabled() || !m_View->HasSplitView()) return;
+  const auto other = m_SplitChat;
+  m_SplitChat = m_CurrentChat;
+  m_SplitFocusRight = !m_SplitFocusRight;
+  SwitchToChat(other);
+  ReinitView();
+}
+
 void UiModel::Impl::OnKeyToggleSplit()
 {
-  // split on: dock the current chat in the right pane, keep browsing on the left
   AnyUserKeyInput();
   if (m_SplitEnabled)
   {
     m_SplitEnabled = false;
     m_SplitChat = s_ChatNone;
+    m_SplitFocusRight = false;
   }
   else
   {
     if (m_CurrentChat == s_ChatNone) return;
-
-    m_SplitEnabled = true;
-    m_SplitChat = m_CurrentChat;
-    AddTab(m_SplitChat);
-
-    // move focus to the most recent other tab, if any
+    std::pair<std::string, std::string> other;
     for (auto it = m_Tabs.rbegin(); it != m_Tabs.rend(); ++it)
     {
-      if (*it != m_SplitChat)
+      if (*it != m_CurrentChat)
       {
-        SwitchToChat(*it);
+        other = *it;
         break;
       }
     }
+    if (other == s_ChatNone)
+    {
+      for (const auto& chat : m_ChatVec)
+      {
+        if (chat != m_CurrentChat)
+        {
+          other = chat;
+          break;
+        }
+      }
+    }
+    if (other == s_ChatNone)
+    {
+      m_TriggerTerminalBell = true;
+      return;
+    }
+    m_SplitEnabled = true;
+    m_SplitChat = m_CurrentChat;
+    m_SplitFocusRight = false;
+    SwitchToChat(other);
+    AddTab(m_SplitChat);
   }
-
   ReinitView();
   m_View->Draw();
 }
@@ -5175,6 +5311,7 @@ void UiModel::KeyHandler(wint_t p_Key)
   static wint_t keyToggleTab = UiKeyConfig::GetKey("toggle_tab");
   static wint_t keyToggleSplit = UiKeyConfig::GetKey("toggle_split");
   static wint_t keySwapSplit = UiKeyConfig::GetKey("swap_split");
+  static wint_t keyFocusPane = UiKeyConfig::GetKey("focus_pane");
   static wint_t keyPreferences = UiKeyConfig::GetKey("preferences");
   static const std::vector<wint_t> keyTabs = []()
   {
@@ -5380,6 +5517,12 @@ void UiModel::KeyHandler(wint_t p_Key)
     std::unique_lock<owned_mutex> lock(m_ModelMutex);
     if (GetImpl().GetEditMessageActive()) return;
     GetImpl().OnKeySwapSplit();
+  }
+  else if (p_Key == keyFocusPane)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyFocusPane();
   }
   else if (p_Key == keyPreferences)
   {
@@ -5704,6 +5847,12 @@ std::vector<std::pair<std::string, std::string>> UiModel::GetTabsLocked()
   return GetImpl().GetTabs();
 }
 
+bool UiModel::GetSplitFocusRightLocked()
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetSplitFocusRight();
+}
+
 std::pair<std::string, std::string> UiModel::GetSplitChatLocked()
 {
   nc_assert(m_ModelMutex.owns_lock());
@@ -5830,16 +5979,16 @@ bool UiModel::GetEmojiEnabledLocked()
   return GetImpl().GetEmojiEnabled();
 }
 
-int UiModel::GetEntryPosLocked()
+int UiModel::GetEntryPosLocked(bool p_Split)
 {
   nc_assert(m_ModelMutex.owns_lock());
-  return GetImpl().GetEntryPos();
+  return GetImpl().GetEntryPos(p_Split);
 }
 
-std::wstring UiModel::GetEntryStrLocked()
+std::wstring UiModel::GetEntryStrLocked(bool p_Split)
 {
   nc_assert(m_ModelMutex.owns_lock());
-  return GetImpl().GetEntryStr();
+  return GetImpl().GetEntryStr(p_Split);
 }
 
 int UiModel::GetHelpOffsetLocked()
@@ -5941,6 +6090,12 @@ void UiModel::OnStatusUpdateLocked(uint32_t p_Status)
 {
   nc_assert(m_ModelMutex.owns_lock());
   GetImpl().OnStatusUpdate(p_Status);
+}
+
+bool UiModel::GetChatIsPinnedLocked(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetChatIsPinned(p_ProfileId, p_ChatId);
 }
 
 void UiModel::OnKeyGotoChat()
@@ -6381,7 +6536,7 @@ void UiModel::OnKeyPin()
     {
       std::unique_lock<owned_mutex> lock(m_ModelMutex);
       const std::string& profileId = GetImpl().GetCurrentChat().first;
-      hasFeature = GetImpl().HasProtocolFeature(profileId, FeaturePinChat);
+      hasFeature = UiConfig::GetBool("pin_local") || GetImpl().HasProtocolFeature(profileId, FeaturePinChat);
     }
 
     if (!hasFeature)

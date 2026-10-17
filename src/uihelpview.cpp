@@ -141,6 +141,7 @@ void UiHelpView::Draw()
     AppendHelpItem("toggle_tab", "TgTab", helpItems);
     AppendHelpItem("toggle_split", "Split", helpItems);
     AppendHelpItem("swap_split", "SwapSplit", helpItems);
+    AppendHelpItem("focus_pane", "FocusPane", helpItems);
     AppendHelpItem("preferences", "Prefs", helpItems);
     AppendHelpItem("unread_chat", "Unread", helpItems);
     AppendHelpItem("select_mention", "Mention", helpItems);
@@ -312,6 +313,10 @@ std::string UiHelpView::GetKeyDisplay(const std::string& p_Func)
   else if (keyName == "KEY_BTAB")
   {
     return "STab";
+  }
+  else if ((keyName.rfind("KEY_F", 0) == 0) && StrUtil::IsInteger(keyName.substr(5)))
+  {
+    return keyName.substr(4);
   }
   else if (keyName == "KEY_UP")
   {

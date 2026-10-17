@@ -1,6 +1,6 @@
 // uiimagepreview.cpp
 //
-// Inline image previews in the history view, rendered as colour block symbols
+// Inline image previews in the history view, rendered as configurable symbols
 // by chafa and mapped onto the terminal's 256-colour palette.
 //
 // nchat is distributed under the MIT license, see LICENSE for details.
@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "fileutil.h"
@@ -26,7 +27,8 @@ bool UiImagePreview::IsEnabled()
 {
   // media_display can be changed at runtime from the preferences dialog
   static const bool hasColors = has_colors() && (COLORS >= 256);
-  return hasColors && (UiConfig::GetStr("media_display") == "preview");
+  return (hasColors || (UiConfig::GetStr("inline_image_color") == "mono")) &&
+    (UiConfig::GetStr("media_display") == "preview");
 }
 
 bool UiImagePreview::IsPreviewable(const std::string& p_FilePath)
@@ -56,12 +58,19 @@ std::string UiImagePreview::GetVideoThumbnail(const std::string& p_FilePath)
   static const std::string thumbDir = FileUtil::GetApplicationDir() + "/temp/thumbs";
   FileUtil::MkDir(thumbDir);
   const std::string thumbPath = thumbDir + "/" + FileUtil::BaseName(p_FilePath) + ".png";
-  if (!FileUtil::Exists(thumbPath))
+  const auto hasThumbnail = [&]()
+  {
+    struct stat st = {};
+    return (stat(thumbPath.c_str(), &st) == 0) && (st.st_size > 0);
+  };
+  if (!hasThumbnail())
   {
     const std::string cmd = "ffmpegthumbnailer -s 512 -t 10% -i '" + StrUtil::EscapeSingleQuote(p_FilePath) +
       "' -o '" + StrUtil::EscapeSingleQuote(thumbPath) + "' </dev/null >/dev/null 2>&1";
-    if ((system(cmd.c_str()) != 0) || !FileUtil::Exists(thumbPath))
+    if ((system(cmd.c_str()) != 0) || !hasThumbnail())
     {
+      // Some failed decodes leave an empty output file. Do not reuse it later.
+      FileUtil::RmFile(thumbPath);
       LOG_WARNING("video thumbnail failed %s", p_FilePath.c_str());
       return std::string();
     }
@@ -77,7 +86,8 @@ const UiImageRows& UiImagePreview::GetRows(const std::string& p_FilePath, int p_
 
   // palette entries redefined by hex colors may grow while drawing, so key on it too
   const std::string key = p_FilePath + "|" + std::to_string(p_MaxW) + "x" + std::to_string(maxH) + "|" +
-    std::to_string(UiColorConfig::GetLastCustomColorId());
+    std::to_string(UiColorConfig::GetLastCustomColorId()) + "|" + UiConfig::GetStr("inline_image_style") +
+    "|" + UiConfig::GetStr("inline_image_color");
   auto it = cache.find(key);
   if (it != cache.end()) return it->second;
 
@@ -99,7 +109,7 @@ void UiImagePreview::DrawRow(WINDOW* p_Win, int p_Y, const std::vector<UiImageCe
     cchar_t cc;
     wchar_t wstr[2] = { cell.ch, L'\0' };
     int pair = cell.pair;
-    setcchar(&cc, wstr, A_NORMAL, 0, &pair);
+    setcchar(&cc, wstr, cell.attr, 0, &pair);
     mvwadd_wch(p_Win, p_Y, x++, &cc);
   }
 }
@@ -107,11 +117,31 @@ void UiImagePreview::DrawRow(WINDOW* p_Win, int p_Y, const std::vector<UiImageCe
 UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, int p_MaxH)
 {
   UiImageRows rows;
+  if ((p_MaxW <= 0) || (p_MaxH <= 0)) return rows;
+
   const std::string imagePath = IsVideo(p_FilePath) ? GetVideoThumbnail(p_FilePath) : p_FilePath;
   if (imagePath.empty()) return rows;
 
   const int w = std::min(p_MaxW, p_MaxH * 4);
-  const std::string cmd = "chafa -f symbols --colors full --symbols block+border+space --animate off "
+  // Only fixed, known symbol classes enter the command, never raw config text.
+  static const std::map<std::string, std::string> styles =
+  {
+    { "blocks", "block+border+space" },
+    { "ascii", "ascii" },
+    { "braille", "braille+space" },
+    { "half", "half+space" },
+    { "quadrants", "quad+space" },
+    { "sextants", "sextant+space" },
+    { "stipple", "stipple+space" },
+    { "mixed", "all-wide" },
+  };
+  const auto style = styles.find(UiConfig::GetStr("inline_image_style"));
+  const std::string symbols = (style != styles.end()) ? style->second : styles.at("blocks");
+  const std::string color = UiConfig::GetStr("inline_image_color");
+  const bool monochrome = (color == "mono");
+  const std::string colorOptions = monochrome ? "--colors none" :
+    ((color == "foreground") ? "--colors full --fg-only" : "--colors full");
+  const std::string cmd = "chafa -f symbols " + colorOptions + " --symbols " + symbols + " --animate off "
     "--polite on -O 0 --size " + std::to_string(w) + "x" + std::to_string(p_MaxH) +
     " -- '" + StrUtil::EscapeSingleQuote(imagePath) + "' </dev/null 2>/dev/null";
 
@@ -143,7 +173,11 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
     }
   }
 
-  pclose(pipe);
+  if (pclose(pipe) != 0)
+  {
+    LOG_WARNING("image preview failed %s", p_FilePath.c_str());
+    return rows;
+  }
 
   // parse SGR truecolor sequences and UTF-8 symbols into cells
   int fg = -1;
@@ -226,7 +260,14 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
 
     UiImageCell cell;
     cell.ch = wch.at(0);
-    cell.pair = inverse ? GetPair(bg, fg) : GetPair(fg, bg);
+    if (monochrome)
+    {
+      cell.attr = inverse ? A_REVERSE : A_NORMAL;
+    }
+    else
+    {
+      cell.pair = inverse ? GetPair(bg, fg) : GetPair(fg, bg);
+    }
     row.push_back(cell);
   }
 

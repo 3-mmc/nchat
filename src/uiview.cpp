@@ -7,6 +7,8 @@
 
 #include "uiview.h"
 
+#include <algorithm>
+
 #include "log.h"
 #include "uiconfig.h"
 #include "uientryview.h"
@@ -46,89 +48,64 @@ void UiView::Init()
 {
   m_UiScreen = std::make_shared<UiScreen>();
 
+  const int screenW = m_UiScreen->W();
+  const int screenH = m_UiScreen->H();
+  const int listW = std::min(m_ListWidth, std::max(0, screenW - 21));
+  const bool showList = m_ListEnabled && (listW >= 3);
+  m_UiListView = std::make_shared<UiListView>(UiViewParams(0, 0, listW, screenH, showList, m_UiModel));
+  m_UiListBorderView = std::make_shared<UiListBorderView>(
+    UiViewParams(showList ? listW : 0, 0, 1, screenH, showList, m_UiModel));
+
+  // Everything belonging to a conversation starts after the full-height sidebar.
+  const int chatX = showList ? listW + 1 : 0;
+  const int chatW = screenW - chatX;
+  m_UiTopView = std::make_shared<UiTopView>(UiViewParams(chatX, 0, chatW, 1, m_TopEnabled, m_UiModel));
+  m_UiHelpView = std::make_shared<UiHelpView>(
+    UiViewParams(chatX, screenH - 1, chatW, 1, m_HelpEnabled, m_UiModel));
+
+  const int topH = m_UiTopView->H();
+  const int helpH = m_UiHelpView->H();
+  const int statusH = m_StatusEnabled ? 1 : 0;
+  // One recipient label plus the configured input height; leave room for history.
+  const int entryH = std::min(m_EntryHeight + 1, std::max(2, screenH - topH - helpH - statusH - 3));
+  const int entryY = screenH - helpH - entryH;
+  const int statusY = entryY - statusH;
+  const int historyH = statusY - topH;
+  const bool split = m_UiModel->GetSplitEnabledLocked() && (chatW >= 41);
+  const bool focusRight = split && m_UiModel->GetSplitFocusRightLocked();
+  const int leftW = split ? (chatW - 1) / 2 : chatW;
+  const int rightW = chatW - leftW - 1;
+  const int rightX = chatX + leftW + 1;
+  const int activeX = focusRight ? rightX : chatX;
+  const int activeW = focusRight ? rightW : leftW;
+
+  m_UiHistoryView = std::make_shared<UiHistoryView>(
+    UiViewParams(activeX, topH, activeW, historyH, m_HistoryEnabled, m_UiModel),
+    split ? UiHistoryView::PaneMain : UiHistoryView::PaneSingle);
+  m_UiStatusView = std::make_shared<UiStatusView>(
+    UiViewParams(activeX, statusY, activeW, statusH, m_StatusEnabled, m_UiModel));
+  m_UiEntryView = std::make_shared<UiEntryView>(
+    UiViewParams(activeX, entryY, activeW, entryH, m_EntryEnabled, m_UiModel));
+
+  if (split)
   {
-    int w = m_UiScreen->W();
-    int h = 1;
-    int x = 0;
-    int y = 0;
-    UiViewParams params(x, y, w, h, m_TopEnabled, m_UiModel);
-    m_UiTopView = std::make_shared<UiTopView>(params);
+    const int otherX = focusRight ? chatX : rightX;
+    const int otherW = focusRight ? leftW : rightW;
+    m_UiSplitBorderView = std::make_shared<UiListBorderView>(
+      UiViewParams(chatX + leftW, topH, 1, screenH - topH - helpH, true, m_UiModel));
+    m_UiSplitHistoryView = std::make_shared<UiHistoryView>(
+      UiViewParams(otherX, topH, otherW, historyH, m_HistoryEnabled, m_UiModel), UiHistoryView::PaneSplit);
+    m_UiSplitStatusView = std::make_shared<UiStatusView>(
+      UiViewParams(otherX, statusY, otherW, statusH, m_StatusEnabled, m_UiModel), true);
+    m_UiSplitEntryView = std::make_shared<UiEntryView>(
+      UiViewParams(otherX, entryY, otherW, entryH, m_EntryEnabled, m_UiModel), true);
   }
-
+  else
   {
-    int w = m_UiScreen->W();
-    int h = 1;
-    int x = 0;
-    int y = m_UiScreen->H() - h;
-    UiViewParams params(x, y, w, h, m_HelpEnabled, m_UiModel);
-    m_UiHelpView = std::make_shared<UiHelpView>(params);
-  }
-
-  {
-    int w = m_UiScreen->W();
-    int h = m_EntryHeight;
-    int x = 0;
-    int y = m_UiScreen->H() - m_UiHelpView->H() - h;
-    UiViewParams params(x, y, w, h, m_EntryEnabled, m_UiModel);
-    m_UiEntryView = std::make_shared<UiEntryView>(params);
-  }
-
-  {
-    int w = m_UiScreen->W();
-    int h = 1;
-    int x = 0;
-    int y = m_UiScreen->H() - m_UiHelpView->H() - m_UiEntryView->H() - h;
-    UiViewParams params(x, y, w, h, m_StatusEnabled, m_UiModel);
-    m_UiStatusView = std::make_shared<UiStatusView>(params);
-  }
-
-  {
-    int w = m_ListWidth;
-    int h = m_UiScreen->H() - m_UiTopView->H() - m_UiHelpView->H() -
-      m_UiEntryView->H() - m_UiStatusView->H();
-    int x = 0;
-    int y = m_UiTopView->H();
-    UiViewParams params(x, y, w, h, m_ListEnabled, m_UiModel);
-    m_UiListView = std::make_shared<UiListView>(params);
-  }
-
-  {
-    int w = 1;
-    int h = m_UiScreen->H() - m_UiTopView->H() - m_UiHelpView->H() -
-      m_UiEntryView->H() - m_UiStatusView->H();
-    int x = m_UiListView->X() + m_UiListView->W();
-    int y = m_UiTopView->H();
-    UiViewParams params(x, y, w, h, m_ListEnabled && (m_ListWidth > 0), m_UiModel);
-    m_UiListBorderView = std::make_shared<UiListBorderView>(params);
-  }
-
-  {
-    int x = m_UiListBorderView->X() + m_UiListBorderView->W();
-    int w = m_UiScreen->W() - x;
-    int h = m_UiScreen->H() - m_UiTopView->H() - m_UiHelpView->H() -
-      m_UiEntryView->H() - m_UiStatusView->H();
-    int y = m_UiTopView->H();
-
-    // split view: current chat left, docked chat right, separated by a border
-    const bool splitEnabled = m_UiModel->GetSplitEnabledLocked() && (w >= 41);
-    if (splitEnabled)
-    {
-      const int mainW = (w - 1) / 2;
-      const int splitW = w - mainW - 1;
-      UiViewParams mainParams(x, y, mainW, h, m_HistoryEnabled, m_UiModel);
-      m_UiHistoryView = std::make_shared<UiHistoryView>(mainParams, UiHistoryView::PaneMain);
-      UiViewParams borderParams(x + mainW, y, 1, h, true, m_UiModel);
-      m_UiSplitBorderView = std::make_shared<UiListBorderView>(borderParams);
-      UiViewParams splitParams(x + mainW + 1, y, splitW, h, m_HistoryEnabled, m_UiModel);
-      m_UiSplitHistoryView = std::make_shared<UiHistoryView>(splitParams, UiHistoryView::PaneSplit);
-    }
-    else
-    {
-      UiViewParams params(x, y, w, h, m_HistoryEnabled, m_UiModel);
-      m_UiHistoryView = std::make_shared<UiHistoryView>(params);
-      m_UiSplitBorderView.reset();
-      m_UiSplitHistoryView.reset();
-    }
+    m_UiSplitBorderView.reset();
+    m_UiSplitHistoryView.reset();
+    m_UiSplitStatusView.reset();
+    m_UiSplitEntryView.reset();
   }
 }
 
@@ -144,6 +121,8 @@ void UiView::Draw()
   {
     m_UiSplitBorderView->Draw();
     m_UiSplitHistoryView->Draw();
+    m_UiSplitStatusView->Draw();
+    m_UiSplitEntryView->Draw();
   }
   m_UiEntryView->Draw();
   curs_set(1);
@@ -203,6 +182,7 @@ void UiView::SetListDirty(bool p_Dirty)
 void UiView::SetStatusDirty(bool p_Dirty)
 {
   m_UiStatusView->SetDirty(p_Dirty);
+  if (m_UiSplitStatusView) m_UiSplitStatusView->SetDirty(p_Dirty);
 }
 
 void UiView::SetHistoryDirty(bool p_Dirty)
@@ -227,6 +207,7 @@ void UiView::SetHelpDirty(bool p_Dirty)
 void UiView::SetEntryDirty(bool p_Dirty)
 {
   m_UiEntryView->SetDirty(p_Dirty);
+  if (m_UiSplitEntryView) m_UiSplitEntryView->SetDirty(p_Dirty);
 }
 
 int UiView::GetHistoryShowCount()
@@ -268,4 +249,9 @@ void UiView::IncreaseListWidth()
   {
     ++m_ListWidth;
   }
+}
+
+bool UiView::HasSplitView()
+{
+  return m_UiSplitHistoryView != nullptr;
 }

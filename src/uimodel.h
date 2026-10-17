@@ -75,11 +75,13 @@ private:
     void OnKeyToggleTab();
     void OnKeyToggleSplit();
     void OnKeySwapSplit();
+    void OnKeyFocusPane();
     void AddTab(const std::pair<std::string, std::string>& p_Chat);
     void SwitchToChat(const std::pair<std::string, std::string>& p_Chat);
     std::vector<std::pair<std::string, std::string>> GetTabs();
     std::pair<std::string, std::string> GetSplitChat();
     bool GetSplitEnabled();
+    bool GetSplitFocusRight();
     void LoadTabs();
     void SaveTabs();
     std::vector<std::string> GetOrderedProfileIds();
@@ -130,10 +132,11 @@ private:
     bool IsContactSelf(const std::string& p_ProfileId, const std::string& p_ContactId);
     int64_t GetLastMessageTime(const std::string& p_ProfileId, const std::string& p_ChatId);
     bool GetChatIsUnread(const std::string& p_ProfileId, const std::string& p_ChatId);
+    bool GetChatIsPinned(const std::string& p_ProfileId, const std::string& p_ChatId);
     std::string GetChatStatus(const std::string& p_ProfileId, const std::string& p_ChatId);
 
-    std::wstring& GetEntryStr();
-    int& GetEntryPos();
+    std::wstring& GetEntryStr(bool p_Split = false);
+    int& GetEntryPos(bool p_Split = false);
 
     std::vector<std::pair<std::string, std::string>>& GetChatVec();
     std::vector<std::pair<std::string, std::string>>& GetChatVecLock();
@@ -266,6 +269,8 @@ private:
     bool IsChatLocalArchived(const std::string& p_ProfileId, const std::string& p_ChatId);
     void LoadLocalArchive();
     void SaveLocalArchive();
+    void LoadLocalPins();
+    void SaveLocalPins();
     void AddQuoteFromSelectedMessage(ChatMessage& p_ChatMessage);
 
   private:
@@ -284,8 +289,11 @@ private:
     std::vector<std::pair<std::string, std::string>> m_Tabs;
     std::pair<std::string, std::string> m_SplitChat;
     bool m_SplitEnabled = false;
+    bool m_SplitFocusRight = false;
+    std::pair<std::string, std::string> m_LastCurrentChat;
     std::map<std::string, std::string> m_ProfileConnState;
     std::set<std::pair<std::string, std::string>> m_LocalArchived; // archive_local=1
+    std::map<std::pair<std::string, std::string>, bool> m_LocalPins; // local overrides, including unpins
     std::unordered_map<std::string, std::unordered_map<std::string, ChatInfo>> m_ChatInfos;
     std::unordered_map<std::string, std::unordered_map<std::string, ContactInfo>> m_ContactInfos;
     int64_t m_ContactInfosUpdateTime = 0;
@@ -386,11 +394,13 @@ public:
 
   // Locked methods require caller to hold model mutex (intended for Ui*View classes)
   bool GetChatIsUnreadLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
+  bool GetChatIsPinnedLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetChatStatusLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetListViewLabelLocked();
   std::vector<std::pair<std::string, std::string>> GetTabsLocked();
   std::pair<std::string, std::string> GetSplitChatLocked();
   bool GetSplitEnabledLocked();
+  bool GetSplitFocusRightLocked();
   std::string GetProtocolLabelLocked(const std::string& p_ProfileId);
   std::string GetContactHandleLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
 
@@ -410,8 +420,8 @@ public:
   std::pair<std::string, std::string>& GetCurrentChatLocked();
   bool GetEditMessageActiveLocked();
   bool GetEmojiEnabledLocked();
-  int GetEntryPosLocked();
-  std::wstring GetEntryStrLocked();
+  int GetEntryPosLocked(bool p_Split = false);
+  std::wstring GetEntryStrLocked(bool p_Split = false);
   int GetHelpOffsetLocked();
   int64_t GetLastMessageTimeLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   bool GetListDialogActiveLocked();

@@ -12,7 +12,10 @@
 class UiStatusView : public UiViewBase
 {
 public:
-  UiStatusView(const UiViewParams& p_Params);
+  UiStatusView(const UiViewParams& p_Params, bool p_IsSplit = false);
 
   virtual void Draw();
+
+private:
+  bool m_IsSplit = false;
 };

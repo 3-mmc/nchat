@@ -75,6 +75,7 @@ void UiConfig::Init()
     { "tabs_enabled", "1" },
     { "archive_local", "0" },
     { "inline_audio", "1" },
+    { "inline_image_backend", "symbols" }, // symbols or sixel (explicit terminal opt-in)
     { "inline_image_lines", "10" },
     { "inline_image_style", "blocks" },
     { "inline_image_color", "color" },

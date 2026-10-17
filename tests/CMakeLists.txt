@@ -49,5 +49,19 @@ if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
     add_test(NAME test_ui_panes COMMAND ${Python3_EXECUTABLE}
              ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_regression.py ${CMAKE_BINARY_DIR})
     set_tests_properties(test_ui_panes PROPERTIES TIMEOUT 60)
+    find_program(CHAFA_EXECUTABLE chafa)
+    if(CHAFA_EXECUTABLE)
+      add_test(NAME test_image_preview COMMAND ${Python3_EXECUTABLE}
+               ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_regression.py ${CMAKE_BINARY_DIR} test_image_preview.cpp)
+      set_tests_properties(test_image_preview PROPERTIES TIMEOUT 60)
+      add_test(NAME test_preferences_preview COMMAND ${Python3_EXECUTABLE}
+               ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_regression.py ${CMAKE_BINARY_DIR} test_preferences_preview.cpp)
+      set_tests_properties(test_preferences_preview PROPERTIES TIMEOUT 60)
+      if(UNIX AND NOT APPLE)
+        add_test(NAME test_pixel_graphics COMMAND ${Python3_EXECUTABLE}
+                 ${CMAKE_CURRENT_SOURCE_DIR}/run_ui_regression.py ${CMAKE_BINARY_DIR} test_pixel_graphics.cpp)
+        set_tests_properties(test_pixel_graphics PROPERTIES TIMEOUT 60)
+      endif()
+    endif()
   endif()
 endif()

@@ -254,6 +254,8 @@ void UiKeyConfig::Init(bool p_MapKeys)
     { "tab_7", "\\33\\67" },
     { "tab_8", "\\33\\70" },
     { "tab_9", "\\33\\71" },
+    { "prev_tab", "KEY_F8" },
+    { "next_tab", "KEY_F9" },
     { "toggle_tab", "\\33\\60" }, // alt/opt-0
     { "toggle_split", "\\33\\166" }, // alt/opt-v
     { "swap_split", "\\33\\170" }, // alt/opt-x

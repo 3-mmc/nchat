@@ -36,5 +36,6 @@ private:
   int m_PaddedH = 0;
   int m_PaddedW = 0;
   int m_HistoryShowCount = 0;
+  uint64_t m_GraphicsRevision = 0;
   Pane m_Pane = PaneSingle;
 };

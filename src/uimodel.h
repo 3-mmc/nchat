@@ -78,6 +78,7 @@ private:
 
     // tabs, split view, accounts and preferences
     void OnKeySwitchTab(int p_Index);
+    void OnKeyCycleTab(int p_Direction);
     void OnKeyToggleTab();
     void OnKeyToggleSplit();
     void OnKeySwapSplit();

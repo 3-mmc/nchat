@@ -442,6 +442,9 @@ add_executable(nchat
   src/uiimagepreview.h
   src/uiprefsdialog.cpp
   src/uiprefsdialog.h
+  src/uipreviewsample.h
+  src/uipixelgraphics.cpp
+  src/uipixelgraphics.h
   src/uikeyconfig.cpp
   src/uikeyconfig.h
   src/uikeydump.cpp

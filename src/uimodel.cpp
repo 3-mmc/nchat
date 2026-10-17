@@ -41,6 +41,7 @@
 #include "uikeyinput.h"
 #include "uimessagedialog.h"
 #include "uiprefsdialog.h"
+#include "uipixelgraphics.h"
 #include "uitextinputdialog.h"
 #include "uiview.h"
 
@@ -73,6 +74,7 @@ void UiModel::Impl::Init()
 
 void UiModel::Impl::Cleanup()
 {
+  UiPixelGraphics::ClearAll();
   SaveDrafts();
   UiAudioPlayer::Stop();
 }
@@ -147,6 +149,7 @@ void UiModel::Impl::TerminalResize()
 
 void UiModel::Impl::TerminalControlPause()
 {
+  UiPixelGraphics::ClearAll();
   m_TermLines = LINES;
   m_TermCols = COLS;
   printf("\033[?1004l"); // disable terminal focus in/out event
@@ -5026,6 +5029,17 @@ void UiModel::Impl::OnKeySwitchTab(int p_Index)
   UpdateTop();
 }
 
+void UiModel::Impl::OnKeyCycleTab(int p_Direction)
+{
+  AnyUserKeyInput();
+  if (m_Tabs.empty()) return;
+  const auto current = std::find(m_Tabs.begin(), m_Tabs.end(), m_CurrentChat);
+  const int count = (int)m_Tabs.size();
+  const int index = (current == m_Tabs.end()) ? (p_Direction > 0 ? 0 : count - 1) :
+    ((int)(current - m_Tabs.begin()) + p_Direction + count) % count;
+  OnKeySwitchTab(index);
+}
+
 void UiModel::Impl::OnKeyToggleTab()
 {
   AnyUserKeyInput();
@@ -5480,6 +5494,8 @@ void UiModel::KeyHandler(wint_t p_Key)
   static wint_t keyCycleListView = UiKeyConfig::GetKey("cycle_list_view");
   static wint_t keyTogglePinnedOnly = UiKeyConfig::GetKey("toggle_pinned_only");
   static wint_t keyPlayAudio = UiKeyConfig::GetKey("play_audio");
+  static wint_t keyNextTab = UiKeyConfig::GetKey("next_tab");
+  static wint_t keyPrevTab = UiKeyConfig::GetKey("prev_tab");
   static wint_t keyToggleTab = UiKeyConfig::GetKey("toggle_tab");
   static wint_t keyToggleSplit = UiKeyConfig::GetKey("toggle_split");
   static wint_t keySwapSplit = UiKeyConfig::GetKey("swap_split");
@@ -5677,6 +5693,12 @@ void UiModel::KeyHandler(wint_t p_Key)
     std::unique_lock<owned_mutex> lock(m_ModelMutex);
     if (GetImpl().GetEditMessageActive()) return;
     GetImpl().OnKeySwitchTab(std::find(keyTabs.begin(), keyTabs.end(), p_Key) - keyTabs.begin());
+  }
+  else if ((p_Key == keyNextTab) || (p_Key == keyPrevTab))
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyCycleTab(p_Key == keyNextTab ? 1 : -1);
   }
   else if (p_Key == keyToggleTab)
   {
@@ -6099,7 +6121,7 @@ void UiModel::OnKeyPreferences()
   }
 
   // Open modal dialog without model mutex held
-  UiDialogParams params(this, "Preferences", 0.75, 0.75);
+  UiDialogParams params(this, "Preferences", 0.95, 0.85);
   UiPrefsDialog dialog(params);
   dialog.Run();
 

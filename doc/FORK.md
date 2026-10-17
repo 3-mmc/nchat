@@ -21,6 +21,20 @@ PageUp/PageDown navigate the list. Esc or Ctrl-C closes the dialog and applies
 changes. Configured navigation bindings in `key.conf` also work. On an account,
 Enter toggles pinned-only chats and `+`/`-` changes its order.
 
+On a wide terminal, Preferences shows a built-in landscape sample to the right
+of the settings. It refreshes immediately when you change Preview style,
+Preview colours or Preview height, using the same renderer as chat images.
+The sample fits the available panel space; the selected height still applies
+in chats. Narrow/short terminals keep the full-width settings list and show a
+hint to enlarge the window. Resizing restores the sample automatically.
+No personal attachments or downloads are used for the sample.
+
+The character preview uses the terminal's ordinary text grid. Its font size
+cannot be changed independently of the rest of nchat in Xfce Terminal. Increase
+Preview height or try a denser glyph style to show more detail. Reducing the
+terminal font affects all text. The optional Sixel renderer displays pixels
+independently of glyph shape (see below).
+
 Under Media, **Preview style** selects blocks (the existing default), ASCII,
 Braille dots, half blocks, quadrant blocks, sextant blocks, stipple/shading or
 mixed symbols. **Preview colours** selects colour, foreground-only colour
@@ -31,8 +45,71 @@ cached in the current session. Unicode styles need a font with those glyphs;
 ASCII works with ordinary terminal fonts. Chafa must be installed to render
 previews; monochrome previews also work without a 256-colour terminal.
 
+The styles choose the **characters**, while Preview colours chooses how their
+foreground and background are painted. With foreground + background colour,
+several styles look similar because even spaces carry image background colours.
+Foreground-only or monochrome makes each style's character shapes more visible.
+
+| Style | What changes | Best starting point |
+| --- | --- | --- |
+| Blocks | Fractional blocks and borders approximate edges | Colour photo thumbnails |
+| ASCII | Ordinary punctuation, letters and digits | Monochrome for classic text art |
+| Braille | A 2x4 grid of dots per character | Foreground-only for fine dotted outlines |
+| Half blocks | Top/bottom halves, 1x2 samples per character | Colour; simple, widely supported |
+| Quadrants | 2x2 block subdivisions | Colour; more edge detail |
+| Sextants | 2x3 subdivisions using newer Unicode glyphs | Colour, if your font supports them |
+| Stipple | Shading characters simulate tones | Monochrome for a grainy look |
+| Mixed | A broad mixture of narrow glyphs | Experimental; more font dependent |
+
+Start with **half blocks**, **foreground + background**, and **16 lines** for
+photos. Try **ASCII + monochrome** for text art. More rows preserve more detail;
+a photo squeezed into six rows will remain very coarse. The same height is
+shared across styles, so finer glyph grids do not make the preview taller.
+
+Preview colour pairs occupy a separate range from UI colours and are never
+recycled while cached images reference them. Chafa quantizes to the xterm
+240-colour cube/grays before choosing glyphs; nchat remaps palette entries
+reserved by theme colours. Theme entries are prepared up front and reused;
+group/contact name colours use the existing palette rather than redefining
+dozens of image colours. Drawing a new contact cannot recolour an existing preview.
+The renderer disables terminal probing, clips to the
+pane, and excludes wide/ambiguous glyphs from Mixed. Missing glyph boxes or gaps
+in Braille/sextants can still be caused by terminal font fallback; Half blocks
+and ASCII are safer choices. Preview rows are character art, not original pixels.
+
 These use Chafa's supported [symbol classes and colour modes](https://github.com/hpjansson/chafa/blob/master/docs/chafa.xml).
 Images remain ordinary character cells, so previews work inside ncurses panes.
+
+Optional Sixel graphics
+-----------------------
+
+In `Alt-g` → Media → **Preview renderer**, select **Sixel pixels (experimental)**
+for actual pixel images, or **characters (portable)** for the existing symbol
+styles. Characters remain the default. Sixel uses the existing `chafa` runtime
+tool, requires no new build dependency, and also works with video thumbnails.
+The live settings sample uses whichever renderer is selected.
+
+Your terminal must support and enable Sixel. Xfce Terminal exposes **Enable sixel
+graphics** in its preferences (`/enable-sixel` in the `xfce4-terminal` xfconf
+channel); enable it before using this mode. This is an explicit opt-in: nchat
+does not send capability probes or consume terminal response bytes. A terminal
+that silently ignores Sixel can show a blank preview; switch to Characters.
+See Xfce's [Sixel preference and VTE integration](https://github.com/xfce-mirror/xfce4-terminal/blob/master/terminal/terminal-screen.c).
+
+Sixel dimensions come from the terminal's reported pixel/cell geometry. Images
+are bounded to the preview rectangle and preserve aspect ratio. Changes in
+font size or terminal geometry generate a new raster. Native image colours are
+used; character style and Preview colours affect only character previews.
+A bigger Preview height increases the image area without shrinking chat text.
+
+Each pane owns its overlays. Switching chats, resizing, opening dialogs,
+launching external programs and exiting erase old image rectangles. Nested
+dialogs suppress covered images; closing them restores visible chat images.
+Partially clipped images use character rows so pixel data never spills into a
+header, sidebar, composer or another pane. If output is not a TTY, pixel metrics
+are missing, encoding fails, or tmux/screen is detected, characters are used.
+Sixel passthrough through multiplexers and Kitty/iTerm graphics are not
+implemented. Native image display still needs a live check in your terminal.
 
 Tabs show compact names for navigation. A single header above each conversation
 shows the full contact name and optional number/@handle on the left, with the
@@ -49,6 +126,11 @@ Pane layout and composing
 
 The sidebar spans the terminal's full height. Tabs, history, status, message
 input and shortcut help occupy only the conversation area to its right.
+
+`F8` / `F9` cycles to the previous / next chat tab, wrapping at the ends.
+From a chat outside the tab bar, F8 selects the last tab and F9 selects the first.
+`Tab` / `Shift-Tab` still navigates the sidebar chat list. Alt-1 through Alt-9
+remains available for direct tab selection when the terminal passes those keys.
 
 `Alt-v` opens/closes a split view with two different chats. Each pane has its own
 message field and per-chat draft. The highlighted **To name** label and cursor
@@ -164,6 +246,7 @@ ui.conf:
 - `pin_local` – pin/unpin chats locally (default `1`); set to `0` for service pins.
 - `activity_animations` – pulse fresh activity and animate slow sends (default `1`).
 - `media_display` – `preview` (default), `name` or `path` for attachments.
+- `inline_image_backend` – `symbols` (default) or `sixel` (explicit opt-in).
 - `inline_image_lines` – maximum preview height (default `10`).
 - `inline_image_style` – `blocks` (default), `ascii`, `braille`, `half`,
   `quadrants`, `sextants`, `stipple` or `mixed`.
@@ -176,6 +259,7 @@ key.conf:
 - `pin` (alt-p) – pin/unpin the current chat; pins a message when one is selected.
 - `toggle_pinned_only` (alt-o), `play_audio`.
 - `preferences` (alt-g) – media, chats and accounts settings.
+- `prev_tab` (F8), `next_tab` (F9) – cycle chat tabs.
 - `retry_send` (F7) – retry one failed send in the focused chat.
 - `focus_pane` (F6), `toggle_split` (alt-v), `swap_split` (alt-x).
 
@@ -188,6 +272,10 @@ geometry, drafts, cursor focus, account/chat send routing, tabs, pane swaps,
 resizing, deletion, activity indicators, send retries and draft restart recovery
 with fake protocols. It never loads real accounts.
 Run it directly with `python3 tests/run_ui_regression.py build` after building.
+When Chafa is available, image and preferences tests cover the style/colour
+matrix and live settings sample. On Linux, `test_pixel_graphics` runs real Sixel
+encoding on a private PTY and checks pixel bounds, fallback, chat switching,
+split view, nested dialogs and clipped-image cleanup without real accounts.
 
 Updating from upstream
 ----------------------

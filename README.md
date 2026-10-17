@@ -4,7 +4,7 @@ nchat
 > **This is a personal fork of [d99kris/nchat](https://github.com/d99kris/nchat).**
 > It adds Instagram DMs (via [mautrix-meta](https://github.com/mautrix/meta)'s
 > instameow, build with `-DHAS_INSTAGRAM=ON`), inline image / video thumbnail
-> previews (chafa), inline voice note playback (ffplay), protocol views,
+> previews (chafa, with optional Sixel pixels), inline voice note playback (ffplay), protocol views,
 > local chat pins and archive, tabs, split panes with independent composers,
 > saved drafts, message activity indicators, failed-send retries and preferences.
 > See [doc/FORK.md](doc/FORK.md) for details.

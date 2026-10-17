@@ -110,6 +110,20 @@ void UiColorConfig::Init()
     const int bg = GetColorId(m_Config.Get("default_color_bg"));
     const int fg = GetColorId(m_Config.Get("default_color_fg"));
     assume_default_colors(fg, bg);
+    // Resolve the theme palette before any image uses xterm colour indices.
+    // Later lazy creation of text pairs must not redefine image colours.
+    bool hasUserColors = false;
+    std::string userParam;
+    for (const auto& entry : m_Config.GetMap())
+    {
+      if (entry.second.compare(0, 2, "0x") == 0) GetColorId(entry.second);
+      if (entry.second == userColor)
+      {
+        hasUserColors = true;
+        userParam = entry.first.substr(0, entry.first.size() - 3); // _fg / _bg
+      }
+    }
+    if (hasUserColors) GetUserColorPair(userParam, "");
   }
 }
 
@@ -127,6 +141,9 @@ int UiColorConfig::GetColorPair(const std::string& p_Param)
   auto colorPair = colorPairs.find(p_Param);
   if (colorPair != colorPairs.end()) return colorPair->second;
 
+  // Image previews reserve pair IDs 256 and above. COLOR_PAIR also
+  // stores only eight bits in the UI's existing attribute interface.
+  if (colorPairId >= 255) return 0;
   ++colorPairId;
   const int id = colorPairId;
   const int fg = GetColorId(m_Config.Get(p_Param + "_fg"));
@@ -185,6 +202,15 @@ int UiColorConfig::GetUserColorPair(const std::string& p_Param, const std::strin
     }
   }();
 
+  // Group/contact colours share the fixed palette instead of consuming
+  // dozens of image palette slots with custom definitions.
+  static const std::vector<int> userColorIds = [&]()
+  {
+    std::vector<int> ids;
+    for (const auto& color : userColors) ids.push_back(GetColorId(color, false));
+    return ids;
+  }();
+
   static size_t userColorCount = userColors.size();
   if (userColorCount == 0) return 0;
 
@@ -195,9 +221,12 @@ int UiColorConfig::GetUserColorPair(const std::string& p_Param, const std::strin
   auto colorPair = colorPairs.find(userIdColor);
   if (colorPair != colorPairs.end()) return colorPair->second;
 
+  // Image previews reserve pair IDs 256 and above. COLOR_PAIR also
+  // stores only eight bits in the UI's existing attribute interface.
+  if (colorPairId >= 255) return 0;
   ++colorPairId;
   const int id = colorPairId;
-  const int fg = GetColorId(userColors.at(userIdColor));
+  const int fg = userColorIds.at(userIdColor);
   const int bg = GetColorId(m_Config.Get(p_Param + "_bg"));
   init_pair(id, fg, bg);
 
@@ -237,7 +266,7 @@ int UiColorConfig::GetAttribute(const std::string& p_Param)
   return A_NORMAL;
 }
 
-int UiColorConfig::GetColorId(const std::string& p_Str)
+int UiColorConfig::GetColorId(const std::string& p_Str, bool p_Custom)
 {
   static const std::map<std::string, int> standardColors = []()
   {
@@ -281,6 +310,33 @@ int UiColorConfig::GetColorId(const std::string& p_Str)
   // hex
   if ((p_Str.size() == 8) && (p_Str.substr(0, 2) == "0x"))
   {
+    if (!p_Custom && COLORS >= 256)
+    {
+      uint32_t r, g, b;
+      HexToRGB(p_Str, r, g, b);
+      static const int levels[] = {0, 95, 135, 175, 215, 255};
+      long bestDistance = -1;
+      int bestIndex = -1;
+      for (int idx = 16; idx < 256; ++idx)
+      {
+        if ((idx >= 32) && (idx <= customColorId)) continue;
+        const int cube = idx - 16;
+        const int gray = 8 + (idx - 232) * 10;
+        const long dr = (long)r - (idx < 232 ? levels[cube / 36] : gray);
+        const long dg = (long)g - (idx < 232 ? levels[(cube / 6) % 6] : gray);
+        const long db = (long)b - (idx < 232 ? levels[cube % 6] : gray);
+        const long distance = 2 * dr * dr + 4 * dg * dg + 3 * db * db;
+        if ((bestDistance < 0) || (distance < bestDistance))
+        {
+          bestDistance = distance;
+          bestIndex = idx;
+        }
+      }
+      return bestIndex;
+    }
+    static std::map<std::string, int> hexColorIds;
+    const auto cached = hexColorIds.find(p_Str);
+    if (cached != hexColorIds.end()) return cached->second;
     if (!can_change_color())
     {
       LOG_WARNING("terminal cannot set custom hex colors, skipping \"%s\"", p_Str.c_str());
@@ -300,6 +356,7 @@ int UiColorConfig::GetColorId(const std::string& p_Str)
       }
 
       init_color(colorId, ((r * 1000) / 255), ((g * 1000) / 255), ((b * 1000) / 255));
+      hexColorIds[p_Str] = colorId;
       return colorId;
     }
 

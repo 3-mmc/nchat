@@ -47,6 +47,7 @@ UiHistoryView::UiHistoryView(const UiViewParams& p_Params, Pane p_Pane)
 
 UiHistoryView::~UiHistoryView()
 {
+  UiPixelGraphics::Clear(this);
   if (m_PaddedWin != nullptr)
   {
     delwin(m_PaddedWin);
@@ -56,8 +57,13 @@ UiHistoryView::~UiHistoryView()
 
 void UiHistoryView::Draw()
 {
+  const uint64_t revision = UiPixelGraphics::Revision();
+  if (m_GraphicsRevision != revision) m_Dirty = true;
+  m_GraphicsRevision = revision;
   if (!m_Enabled || !m_Dirty) return;
   m_Dirty = false;
+  if (UiPixelGraphics::Clear(this)) redrawwin(m_PaddedWin);
+  std::vector<UiPixelPlacement> placements;
 
   curs_set(0);
 
@@ -136,6 +142,8 @@ void UiHistoryView::Draw()
     }();
 
     const UiImageRows* imageRows = nullptr;
+    std::shared_ptr<const UiPixelImage> imagePixels;
+    bool pixelVisible = false;
     std::vector<std::wstring> wlines;
     if (!msg.text.empty())
     {
@@ -251,8 +259,10 @@ void UiHistoryView::Draw()
       if (UiImagePreview::IsEnabled() && (fileInfo.fileStatus == FileStatusDownloaded) &&
           UiImagePreview::IsPreviewable(fileInfo.filePath))
       {
-        imageRows = &UiImagePreview::GetRows(fileInfo.filePath, m_PaddedW);
-        for (size_t row = imageRows->size(); row > 0; --row)
+        imagePixels = UiImagePreview::GetPixels(fileInfo.filePath, m_PaddedW, 0, this);
+        imageRows = &UiImagePreview::GetRows(fileInfo.filePath, m_PaddedW, imagePixels ? imagePixels->rows : 0);
+        const size_t height = imagePixels ? imagePixels->rows : imageRows->size();
+        for (size_t row = height; row > 0; --row)
         {
           wlines.insert(wlines.begin(), imageRowIndicator + std::to_wstring(row - 1));
         }
@@ -356,7 +366,20 @@ void UiHistoryView::Draw()
       if ((imageRows != nullptr) && (wline->rfind(imageRowIndicator, 0) == 0))
       {
         const size_t row = std::stoul(wline->substr(imageRowIndicator.size()));
-        if (row < imageRows->size())
+        if (imagePixels && row == (size_t)(imagePixels->rows - 1))
+        {
+          const int top = y - (int)row;
+          pixelVisible = top >= 0;
+          if (pixelVisible)
+          {
+            int winY, winX;
+            getbegyx(m_PaddedWin, winY, winX);
+            placements.push_back({imagePixels, winX, winY + top});
+          }
+        }
+        // A clipped image uses character rows; a raw Sixel is never allowed
+        // to extend above the history pane or over headers/other panes.
+        if (!pixelVisible && row < imageRows->size())
         {
           UiImagePreview::DrawRow(m_PaddedWin, y, imageRows->at(row), m_PaddedW);
         }
@@ -484,6 +507,7 @@ void UiHistoryView::Draw()
   }
 
   wrefresh(m_PaddedWin);
+  UiPixelGraphics::Show(this, placements);
 }
 
 void UiHistoryView::DrawPaneHeader(const std::pair<std::string, std::string>& p_Chat)

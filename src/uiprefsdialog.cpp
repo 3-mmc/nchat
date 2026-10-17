@@ -14,6 +14,9 @@
 #include "strutil.h"
 #include "timeutil.h"
 #include "uiconfig.h"
+#include "uicolorconfig.h"
+#include "uiimagepreview.h"
+#include "uipreviewsample.h"
 #include "uikeyconfig.h"
 #include "uimodel.h"
 #include "uitextinputdialog.h"
@@ -59,12 +62,14 @@ void UiPrefsDialog::BuildItems()
   header("Media");
   choice("Images and videos", "media_display", false,
          { { "preview", "inline preview" }, { "name", "file name" }, { "path", "full path" } });
+  choice("Preview renderer", "inline_image_backend", false,
+         { { "symbols", "characters (portable)" }, { "sixel", "Sixel pixels (experimental)" } });
   choice("Preview style", "inline_image_style", false,
-         { { "blocks", "blocks (default)" }, { "ascii", "ASCII" }, { "braille", "Braille dots" },
-           { "half", "half blocks" }, { "quadrants", "quadrant blocks" }, { "sextants", "sextant blocks" },
-           { "stipple", "stipple / shading" }, { "mixed", "mixed symbols" } });
+         { { "blocks", "blocks (smooth colour)" }, { "ascii", "ASCII (text art)" }, { "braille", "Braille (2x4 dots)" },
+           { "half", "half blocks (1x2)" }, { "quadrants", "quadrants (2x2)" }, { "sextants", "sextants (2x3, font needed)" },
+           { "stipple", "stipple (shading)" }, { "mixed", "mixed (experimental)" } });
   choice("Preview colours", "inline_image_color", false,
-         { { "color", "colour" }, { "foreground", "foreground only" }, { "mono", "monochrome" } });
+         { { "color", "foreground + background" }, { "foreground", "foreground / terminal bg" }, { "mono", "monochrome / text art" } });
   choice("Preview height", "inline_image_lines", false,
          { { "6", "6 lines" }, { "8", "8 lines" }, { "10", "10 lines" }, { "12", "12 lines" },
            { "16", "16 lines" }, { "20", "20 lines" }, { "24", "24 lines" } });
@@ -122,7 +127,8 @@ void UiPrefsDialog::UpdateList()
   m_Items.clear();
   m_LastStates.clear();
 
-  const int valueX = std::min(34, m_W / 2);
+  const int listWidth = GetListWidth();
+  const int valueX = std::min(34, listWidth / 2);
   for (const auto& item : m_PrefItems)
   {
     std::string line;
@@ -177,13 +183,102 @@ void UiPrefsDialog::UpdateList()
         dot + " " + state + (pinnedOnly ? "   pinned chats only" : "   all chats");
     }
 
-    m_Items.push_back(StrUtil::TrimPadWString(StrUtil::ToWString(line), m_W));
+    m_Items.push_back(StrUtil::TrimPadWString(StrUtil::ToWString(line), listWidth));
   }
+}
+
+int UiPrefsDialog::GetListWidth() const
+{
+  // Keep complete setting labels/values readable before adding the sample.
+  return ((m_W >= 96) && (m_H >= 12)) ? (m_W * 3 / 5) : m_W;
+}
+
+void UiPrefsDialog::Draw()
+{
+  if (UiPixelGraphics::Clear(this)) redrawwin(m_Win);
+  UpdateFooter();
+  UiListDialog::Draw();
+  const int listWidth = GetListWidth();
+  if (listWidth < m_W) DrawPreview(listWidth);
+}
+
+void UiPrefsDialog::DrawPreview(int p_ListWidth)
+{
+  const int left = p_ListWidth + 3;
+  const int width = m_W - left;
+  const int maxRows = m_H - 9;
+  const int pair = UiColorConfig::GetColorPair("dialog_color");
+  wattrset(m_Win, pair);
+  mvwvline(m_Win, 0, p_ListWidth + 1, ACS_VLINE, m_H);
+  auto text = [&](int y, const std::string& value)
+  {
+    if ((y < 0) || (y >= m_H)) return;
+    const auto line = StrUtil::TrimPadWString(StrUtil::ToWString(value), width);
+    mvwaddnwstr(m_Win, y, left, line.c_str(), line.size());
+  };
+  wattron(m_Win, A_BOLD);
+  text(0, "Live sample");
+  wattroff(m_Win, A_BOLD);
+  const std::string style = UiConfig::GetStr("inline_image_style");
+  const std::string mode = UiConfig::GetStr("inline_image_color");
+  text(1, UiPixelGraphics::Selected() ? "Sixel pixels / native image colours" : (style + " / " + mode));
+  std::shared_ptr<const UiPixelImage> pixels;
+
+  const std::string path = FileUtil::GetTempDir() + "/preview-sample.png";
+  if (!FileUtil::Exists(path))
+  {
+    FileUtil::MkDir(FileUtil::GetTempDir());
+    FileUtil::WriteFile(path, std::string(reinterpret_cast<const char*>(UiPreviewSample), sizeof(UiPreviewSample)));
+  }
+  if (!UiPixelGraphics::Selected() && (mode != "mono") &&
+      (!has_colors() || (COLORS < 256) || (COLOR_PAIRS <= 256)))
+  {
+    text(3, "Choose monochrome on this terminal.");
+  }
+  else
+  {
+    pixels = UiImagePreview::GetPixels(path, width, maxRows, this);
+    if (!pixels)
+    {
+      const auto& rows = UiImagePreview::GetRows(path, width, maxRows);
+      if (rows.empty()) text(3, "Sample unavailable; is chafa installed?");
+      else
+      {
+        // A child window lets the shared renderer start at column zero.
+        WINDOW* sample = derwin(m_Win, maxRows, width, 3, left);
+        if (sample)
+        {
+          wattrset(sample, A_NORMAL);
+          for (size_t y = 0; y < rows.size(); ++y) UiImagePreview::DrawRow(sample, y, rows[y], width);
+          wnoutrefresh(sample);
+          delwin(sample);
+        }
+      }
+    }
+  }
+  wattrset(m_Win, pair);
+  const int requested = UiConfig::GetNum("inline_image_lines");
+  text(m_H - 5, std::to_string(requested) + " rows requested; sample fits panel");
+  text(m_H - 4, "More rows show more detail.");
+  text(m_H - 3, "Font size follows the terminal.");
+  if (UiPixelGraphics::Selected())
+  {
+    const std::string reason = UiPixelGraphics::FallbackReason(this);
+    text(m_H - 3, pixels ? "Enable Sixel in terminal settings." :
+         (reason.empty() ? "Encoding failed; showing characters." : reason));
+    text(m_H - 1, "Styles/colours affect characters only.");
+  }
+  else if (style == "ascii") text(m_H - 1, "Tip: try monochrome for text art.");
+  else if ((style == "sextants") || (style == "braille")) text(m_H - 1, "Missing shapes? Try half blocks.");
+  else text(m_H - 1, "Left/Right changes the setting.");
+  wrefresh(m_Win);
+  if (pixels) UiPixelGraphics::Show(this, {{pixels, m_X + left, m_Y + 3}});
 }
 
 void UiPrefsDialog::UpdateFooter()
 {
-  SetFooter("Enter/\xe2\x86\x92 change  \xe2\x86\x90 back  Esc/^C close");
+  const std::string hint = (GetListWidth() == m_W) ? "  Enlarge for sample" : "";
+  SetFooter("Enter/Right change  Left back  Esc/^C close" + hint);
 }
 
 void UiPrefsDialog::Cycle(int p_Delta)

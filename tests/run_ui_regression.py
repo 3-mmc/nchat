@@ -12,6 +12,7 @@ import tempfile
 def main():
     root = Path(__file__).resolve().parent.parent
     build = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else root / "build"
+    source = root / "tests" / (sys.argv[2] if len(sys.argv) > 2 else "test_ui_panes.cpp")
     target = build / "CMakeFiles/nchat.dir"
     if not (target / "link.txt").exists():
         sys.exit("Build nchat with the Unix Makefiles generator before running this test.")
@@ -30,7 +31,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="nchat-ui-regression-") as scratch:
         binary = str(Path(scratch) / "test_ui_panes")
         command[command.index("-o") + 1] = binary
-        command[1:1] = flags + ["-I" + str(root / "src"), str(root / "tests/test_ui_panes.cpp")]
+        command[1:1] = flags + ["-I" + str(root / "src"), str(source)]
         subprocess.run(command, cwd=build, check=True, timeout=45)
         result = subprocess.run([binary, scratch], cwd=scratch, env=os.environ.copy(), timeout=10)
         if result.returncode:

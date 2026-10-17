@@ -8,6 +8,7 @@
 #pragma once
 
 #include <string>
+#include "uipixelgraphics.h"
 #include <vector>
 
 #include <ncurses.h>
@@ -26,7 +27,9 @@ class UiImagePreview
 public:
   static bool IsEnabled();
   static bool IsPreviewable(const std::string& p_FilePath);
-  static const UiImageRows& GetRows(const std::string& p_FilePath, int p_MaxW);
+  static const UiImageRows& GetRows(const std::string& p_FilePath, int p_MaxW, int p_MaxH = 0);
+  static std::shared_ptr<const UiPixelImage> GetPixels(const std::string& p_FilePath, int p_MaxW, int p_MaxH = 0,
+                                                     const void* p_Owner = nullptr);
   static void DrawRow(WINDOW* p_Win, int p_Y, const std::vector<UiImageCell>& p_Row, int p_MaxW);
 
 private:

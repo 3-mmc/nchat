@@ -8,6 +8,7 @@
 #include "uiimagepreview.h"
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -25,9 +26,10 @@
 
 bool UiImagePreview::IsEnabled()
 {
-  // media_display can be changed at runtime from the preferences dialog
-  static const bool hasColors = has_colors() && (COLORS >= 256);
-  return (hasColors || (UiConfig::GetStr("inline_image_color") == "mono")) &&
+  // Low pair IDs belong to the UI; previews need a separate stable range.
+  const bool hasColors = has_colors() && (COLORS >= 256) && (COLOR_PAIRS > 256);
+  const bool pixels = UiPixelGraphics::Selected() && UiPixelGraphics::FallbackReason().empty();
+  return (pixels || hasColors || (UiConfig::GetStr("inline_image_color") == "mono")) &&
     (UiConfig::GetStr("media_display") == "preview");
 }
 
@@ -79,9 +81,10 @@ std::string UiImagePreview::GetVideoThumbnail(const std::string& p_FilePath)
   return thumbPath;
 }
 
-const UiImageRows& UiImagePreview::GetRows(const std::string& p_FilePath, int p_MaxW)
+const UiImageRows& UiImagePreview::GetRows(const std::string& p_FilePath, int p_MaxW, int p_MaxH)
 {
-  const int maxH = std::max(1, (int)UiConfig::GetNum("inline_image_lines"));
+  const int configuredH = std::max(1, (int)UiConfig::GetNum("inline_image_lines"));
+  const int maxH = (p_MaxH > 0) ? std::min(configuredH, p_MaxH) : configuredH;
   static std::map<std::string, UiImageRows> cache;
 
   // palette entries redefined by hex colors may grow while drawing, so key on it too
@@ -99,18 +102,31 @@ const UiImageRows& UiImagePreview::GetRows(const std::string& p_FilePath, int p_
   return cache[key] = Render(p_FilePath, p_MaxW, maxH);
 }
 
+std::shared_ptr<const UiPixelImage> UiImagePreview::GetPixels(const std::string& p_FilePath, int p_MaxW,
+                                                           int p_MaxH, const void* p_Owner)
+{
+  const int configured = std::max(1, UiConfig::GetNum("inline_image_lines"));
+  const int height = p_MaxH > 0 ? std::min(configured, p_MaxH) : configured;
+  if (!UiPixelGraphics::FallbackReason(p_Owner).empty()) return nullptr;
+  const std::string path = IsVideo(p_FilePath) ? GetVideoThumbnail(p_FilePath) : p_FilePath;
+  if (path.empty()) return nullptr;
+  return UiPixelGraphics::GetImage(path, p_MaxW, height, p_Owner);
+}
+
 void UiImagePreview::DrawRow(WINDOW* p_Win, int p_Y, const std::vector<UiImageCell>& p_Row, int p_MaxW)
 {
   int x = 0;
   for (const auto& cell : p_Row)
   {
-    if (x >= p_MaxW) break;
+    const int width = wcwidth(cell.ch);
+    if ((width <= 0) || (x + width > p_MaxW)) break;
 
     cchar_t cc;
     wchar_t wstr[2] = { cell.ch, L'\0' };
     int pair = cell.pair;
     setcchar(&cc, wstr, cell.attr, 0, &pair);
-    mvwadd_wch(p_Win, p_Y, x++, &cc);
+    mvwadd_wch(p_Win, p_Y, x, &cc);
+    x += width;
   }
 }
 
@@ -129,20 +145,22 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
     { "blocks", "block+border+space" },
     { "ascii", "ascii" },
     { "braille", "braille+space" },
-    { "half", "half+space" },
+    { "half", "vhalf+space" },
     { "quadrants", "quad+space" },
     { "sextants", "sextant+space" },
     { "stipple", "stipple+space" },
-    { "mixed", "all-wide" },
+    { "mixed", "all-wide-ambiguous" },
   };
   const auto style = styles.find(UiConfig::GetStr("inline_image_style"));
   const std::string symbols = (style != styles.end()) ? style->second : styles.at("blocks");
   const std::string color = UiConfig::GetStr("inline_image_color");
-  const bool monochrome = (color == "mono");
+  const bool monochrome = (color == "mono") || !has_colors() || (COLORS < 256) || (COLOR_PAIRS <= 256);
+  // Quantize in Chafa before it chooses glyphs: rounding truecolour fg/bg
+  // afterwards can collapse both to the same colour and lose image detail.
   const std::string colorOptions = monochrome ? "--colors none" :
-    ((color == "foreground") ? "--colors full --fg-only" : "--colors full");
+    ((color == "foreground") ? "--colors 240 --fg-only" : "--colors 240");
   const std::string cmd = "chafa -f symbols " + colorOptions + " --symbols " + symbols + " --animate off "
-    "--polite on -O 0 --size " + std::to_string(w) + "x" + std::to_string(p_MaxH) +
+    "--probe off --relative off --polite on -O 0 --size " + std::to_string(w) + "x" + std::to_string(p_MaxH) +
     " -- '" + StrUtil::EscapeSingleQuote(imagePath) + "' </dev/null 2>/dev/null";
 
   FILE* pipe = popen(cmd.c_str(), "r");
@@ -179,7 +197,7 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
     return rows;
   }
 
-  // parse SGR truecolor sequences and UTF-8 symbols into cells
+  // Parse indexed and truecolour SGR sequences into ncurses cells.
   int fg = -1;
   int bg = -1;
   bool inverse = false;
@@ -208,6 +226,28 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
                                             atoi(params[p + 4].c_str()));
               ((v == 38) ? fg : bg) = idx;
               p += 4;
+            }
+            else if (((v == 38) || (v == 48)) && (p + 2 < params.size()) && (params[p + 1] == "5"))
+            {
+              int idx = atoi(params[p + 2].c_str());
+              // UI theme hex colours redefine a few xterm palette entries.
+              // Remap those entries instead of displaying the theme colour.
+              if ((idx >= 32) && (idx <= UiColorConfig::GetLastCustomColorId()))
+              {
+                static const int levels[] = { 0, 95, 135, 175, 215, 255 };
+                if (idx < 232)
+                {
+                  const int cube = idx - 16;
+                  idx = GetColorIndex(levels[cube / 36], levels[(cube / 6) % 6], levels[cube % 6]);
+                }
+                else
+                {
+                  const int value = 8 + ((idx - 232) * 10);
+                  idx = GetColorIndex(value, value, value);
+                }
+              }
+              ((v == 38) ? fg : bg) = ((idx >= 0) && (idx < COLORS)) ? idx : -1;
+              p += 2;
             }
             else if (v == 0)
             {
@@ -256,7 +296,7 @@ UiImageRows UiImagePreview::Render(const std::string& p_FilePath, int p_MaxW, in
     size_t n = (c < 0x80) ? 1 : ((c >> 5) == 0x6) ? 2 : ((c >> 4) == 0xe) ? 3 : 4;
     std::wstring wch = StrUtil::ToWString(out.substr(i, n));
     i += n;
-    if (wch.empty()) continue;
+    if (wch.empty() || (wcwidth(wch.at(0)) != 1)) continue;
 
     UiImageCell cell;
     cell.ch = wch.at(0);
@@ -350,13 +390,62 @@ int UiImagePreview::GetColorIndex(int p_R, int p_G, int p_B)
 int UiImagePreview::GetPair(int p_Fg, int p_Bg)
 {
   static std::map<std::pair<int, int>, int> pairs;
+  static std::map<std::pair<int, int>, int> approximations;
+  const auto approximate = approximations.find(std::make_pair(p_Fg, p_Bg));
+  if (approximate != approximations.end()) return approximate->second;
   auto it = pairs.find(std::make_pair(p_Fg, p_Bg));
   if (it != pairs.end()) return it->second;
 
-  int pair = alloc_pair(p_Fg, p_Bg);
-  if (pair < 0)
+  // UI pairs grow upwards from 1. Reserve 256+ for previews so lazily
+  // created UI colours never overwrite cached image cells. Do not recycle:
+  // older cached/visible previews still reference these pair IDs.
+  const int pair = 256 + (int)pairs.size();
+  if ((pair >= std::min(COLOR_PAIRS, 32768)) || (init_pair(pair, p_Fg, p_Bg) == ERR))
   {
-    pair = 0;
+    // On exhaustion approximate with a stable existing pair, never reassign it.
+    long bestDistance = -1;
+    int bestPair = 0;
+    for (const auto& existing : pairs)
+    {
+      long distance = 0;
+      for (const auto colors : { std::make_pair(p_Fg, existing.first.first),
+                                  std::make_pair(p_Bg, existing.first.second) })
+      {
+        if (colors.first == colors.second) continue;
+        if ((colors.first < 0) || (colors.second < 0)) { distance += 3000000; continue; }
+        // ncurses' initial color_content table need not match xterm's cube.
+        const auto rgb = [](int idx) -> std::array<int, 3>
+        {
+          if (idx < 16)
+          {
+            short r, g, b;
+            color_content(idx, &r, &g, &b);
+            return {{r * 255 / 1000, g * 255 / 1000, b * 255 / 1000}};
+          }
+          if (idx >= 232)
+          {
+            const int value = 8 + (idx - 232) * 10;
+            return {{value, value, value}};
+          }
+          static const int levels[] = {0, 95, 135, 175, 215, 255};
+          const int cube = idx - 16;
+          return {{levels[cube / 36], levels[(cube / 6) % 6], levels[cube % 6]}};
+        };
+        const auto first = rgb(colors.first), second = rgb(colors.second);
+        for (size_t channel = 0; channel < first.size(); ++channel)
+        {
+          const long delta = first[channel] - second[channel];
+          distance += delta * delta;
+        }
+      }
+      if ((bestDistance < 0) || (distance < bestDistance))
+      {
+        bestDistance = distance;
+        bestPair = existing.second;
+      }
+    }
+    approximations[std::make_pair(p_Fg, p_Bg)] = bestPair;
+    return bestPair;
   }
 
   pairs[std::make_pair(p_Fg, p_Bg)] = pair;

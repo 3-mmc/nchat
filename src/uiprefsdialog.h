@@ -22,6 +22,10 @@ public:
   virtual void KeyHandler(wint_t p_Key);
 
 protected:
+  void Draw() override;
+  int GetListWidth() const;
+  void DrawPreview(int p_ListWidth);
+
   virtual void OnSelect();
   virtual void OnBack();
   virtual bool OnTimer();

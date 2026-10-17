@@ -28,7 +28,7 @@ protected:
   virtual void UpdateList() = 0;
 
   virtual void UpdateFooter();
-  void Draw();
+  virtual void Draw();
 
 protected:
   bool m_ShadeHidden = false;

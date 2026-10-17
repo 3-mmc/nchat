@@ -8,6 +8,7 @@
 #include "uidialog.h"
 
 #include "strutil.h"
+#include "uipixelgraphics.h"
 #include "uicolorconfig.h"
 #include "uimodel.h"
 #include "uiview.h"
@@ -18,12 +19,14 @@ UiDialog::UiDialog(const UiDialogParams& p_Params)
   , m_WReq(p_Params.wReq)
   , m_HReq(p_Params.hReq)
 {
+  UiPixelGraphics::BeginDialog(this);
   Init();
   curs_set(0);
 }
 
 UiDialog::~UiDialog()
 {
+  UiPixelGraphics::EndDialog(this);
   Cleanup();
   curs_set(1);
 }
@@ -51,6 +54,7 @@ void UiDialog::Init()
 
 void UiDialog::Cleanup()
 {
+  UiPixelGraphics::Clear(this);
   delwin(m_Win);
   delwin(m_BorderWin);
 }

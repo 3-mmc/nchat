@@ -71,6 +71,7 @@ void UiConfig::Init()
     { "show_contact_handle", "1" },
     { "protocol_labels", "1" },
     { "account_order", "" },
+    { "activity_animations", "1" },
     { "tabs_enabled", "1" },
     { "archive_local", "0" },
     { "inline_audio", "1" },

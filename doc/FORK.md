@@ -77,6 +77,56 @@ and [menu mnemonic preference](https://github.com/xfce-mirror/xfce4-terminal/blo
 Within nchat, the default Cut and Paste bindings are Ctrl-Alt-x and Ctrl-Alt-v,
 leaving Alt-x and Alt-v for split view. Existing custom key bindings are kept.
 
+Activity indicators
+-------------------
+
+A fresh unread incoming message in a chat that is not visible pulses its
+sidebar/tab marker for six seconds. The usual unread marker remains afterwards.
+Opening the chat stops the pulse, as does revealing it in the other split pane.
+Cached history, old backfill, edits and duplicate events do not start a pulse.
+
+For WhatsApp, Signal and Instagram, a send still awaiting its backend
+acknowledgement after 1.5 seconds shows a spinner and **Sending** in that chat's
+status line and a marker in the sidebar/tab. After 15 seconds the label becomes
+**Still sending**. There is no guessed timeout or automatic resend. Acknowledged
+slow sends briefly show **Sent**; explicit failures show **Send failed** and a
+`!` marker until that failed send is retried. These indicate backend acceptance, while
+delivery/read receipts keep their existing meaning.
+
+Concurrent sends are tracked separately by request ID, including attachments
+and forwarded messages. Indicators stay with their chat when switching focus,
+swapping panes or migrating chat IDs. The dummy protocol also supports send
+acknowledgements; protocols without this capability do not show guessed progress.
+
+Turn off **Activity animations** in `Alt-g` → Chats for reduced motion. The
+ordinary unread markers and static sending/failure labels remain available.
+Timing uses a monotonic clock, and animation ticks redraw only indicator rows.
+
+Saved drafts and retrying sends
+-------------------------------
+
+Unsent message text and cursor positions save per account and chat, including
+both split panes. Drafts are checkpointed once a second while nchat runs and
+flushed on normal exit. Sending removes the saved draft immediately. Existing
+message edits are excluded from new-message draft saves. Text is restored when
+you reopen the chat; reply selection and message-edit mode are not restored.
+
+Drafts live in `drafts.txt` in nchat's configuration directory. Saves replace the
+file atomically and use owner-only permissions. The contents are local,
+unencrypted text (hex encoded to preserve newlines and Unicode). A crash may
+lose up to the last second of typing; normal exit flushes the latest changes.
+
+For WhatsApp, Signal and Instagram, **F7** (`retry_send`) retries the oldest failed
+send in the focused chat. Its original text, reply, mentions and attachment
+metadata are retained separately from your current draft. Each press retries
+one failure; pressing again cannot duplicate an already pending retry. A failure
+shows the configured retry shortcut in the status line. A failed retry returns
+to the queue, and unrelated successful sends do not dismiss other failures.
+
+Retry queues last for the current nchat session. Pending sends without a backend
+answer cannot be retried with F7, and nchat never resends automatically. A retry
+uses the original attachment path, so keep the source file until it succeeds.
+
 Local chat pins
 ---------------
 
@@ -112,6 +162,7 @@ ui.conf:
   only list pinned chats; toggle with `toggle_pinned_only` (alt-o).
 - `archive_local` – archive chats locally only (`archive_chat`, alt-a).
 - `pin_local` – pin/unpin chats locally (default `1`); set to `0` for service pins.
+- `activity_animations` – pulse fresh activity and animate slow sends (default `1`).
 - `media_display` – `preview` (default), `name` or `path` for attachments.
 - `inline_image_lines` – maximum preview height (default `10`).
 - `inline_image_style` – `blocks` (default), `ascii`, `braille`, `half`,
@@ -125,6 +176,7 @@ key.conf:
 - `pin` (alt-p) – pin/unpin the current chat; pins a message when one is selected.
 - `toggle_pinned_only` (alt-o), `play_audio`.
 - `preferences` (alt-g) – media, chats and accounts settings.
+- `retry_send` (F7) – retry one failed send in the focused chat.
 - `focus_pane` (F6), `toggle_split` (alt-v), `swap_split` (alt-x).
 
 UI regression test
@@ -133,7 +185,8 @@ UI regression test
 With a Unix Makefiles build and `HAS_TESTS=ON`, `ctest --test-dir build` includes
 the headless `test_ui_panes` test when Python 3 is available. It checks sidebar
 geometry, drafts, cursor focus, account/chat send routing, tabs, pane swaps,
-resizing and deletion with fake protocols. It never loads real accounts.
+resizing, deletion, activity indicators, send retries and draft restart recovery
+with fake protocols. It never loads real accounts.
 Run it directly with `python3 tests/run_ui_regression.py build` after building.
 
 Updating from upstream

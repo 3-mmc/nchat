@@ -66,7 +66,8 @@ bool WmChat::HasFeature(ProtocolFeature p_ProtocolFeature) const
     FeatureAutoGetContactsOnLogin |
     FeaturePinChat |
     FeatureArchiveChat |
-    FeaturePresenceRequiresOnline;
+    FeaturePresenceRequiresOnline |
+    FeatureSendAcknowledgement;
   return (p_ProtocolFeature & customFeatures);
 }
 
@@ -416,6 +417,7 @@ void WmChat::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessage)
         sendMessageNotify->success = (rv == 0);
         sendMessageNotify->chatId = sendMessageRequest->chatId;
         sendMessageNotify->chatMessage = sendMessageRequest->chatMessage;
+        sendMessageNotify->clientRequestId = sendMessageRequest->clientRequestId;
         CallMessageHandler(sendMessageNotify);
       }
       break;

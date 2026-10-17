@@ -41,7 +41,7 @@ std::string DuChat::GetProfileId() const
 bool DuChat::HasFeature(ProtocolFeature p_ProtocolFeature) const
 {
   static int customFeatures =
-    FeatureAutoGetContactsOnLogin;
+    FeatureAutoGetContactsOnLogin | FeatureSendAcknowledgement;
   return (p_ProtocolFeature & customFeatures);
 }
 
@@ -405,6 +405,7 @@ void DuChat::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessage)
         sendMessageNotify->success = true;
         sendMessageNotify->chatId = sendMessageRequest->chatId;
         sendMessageNotify->chatMessage = sendMessageRequest->chatMessage;
+        sendMessageNotify->clientRequestId = sendMessageRequest->clientRequestId;
         m_MessageHandler(sendMessageNotify);
       }
       break;

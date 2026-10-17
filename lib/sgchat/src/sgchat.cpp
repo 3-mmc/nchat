@@ -63,7 +63,7 @@ std::string SgChat::GetProfileDisplayName() const
 bool SgChat::HasFeature(ProtocolFeature p_ProtocolFeature) const
 {
   // Signal allows editing within ~24 hours
-  ProtocolFeature customFeatures = FeatureEditMessagesWithinTwoDays;
+  const int customFeatures = FeatureEditMessagesWithinTwoDays | FeatureSendAcknowledgement;
   return (p_ProtocolFeature & customFeatures);
 }
 
@@ -444,6 +444,7 @@ void SgChat::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessage)
         sendMessageNotify->success = (rv == 0);
         sendMessageNotify->chatId = sendMessageRequest->chatId;
         sendMessageNotify->chatMessage = sendMessageRequest->chatMessage;
+        sendMessageNotify->clientRequestId = sendMessageRequest->clientRequestId;
         CallMessageHandler(sendMessageNotify);
       }
       break;

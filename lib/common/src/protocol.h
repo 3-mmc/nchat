@@ -34,6 +34,7 @@ enum ProtocolFeature
   FeatureArchiveChat = (1 << 8),
   FeaturePinMessage = (1 << 9),
   FeaturePresenceRequiresOnline = (1 << 10),
+  FeatureSendAcknowledgement = (1 << 11), // echoes clientRequestId in SendMessageNotify
 };
 
 class Protocol
@@ -271,6 +272,7 @@ public:
   virtual MessageType GetMessageType() const { return SendMessageRequestType; }
   std::string chatId;
   ChatMessage chatMessage;
+  uint64_t clientRequestId = 0; // UI correlation only; never sent over the network
 };
 
 class EditMessageRequest : public RequestMessage
@@ -518,6 +520,7 @@ public:
   bool success = false;
   std::string chatId;
   ChatMessage chatMessage;
+  uint64_t clientRequestId = 0;
 };
 
 class ConnectNotify : public ServiceMessage

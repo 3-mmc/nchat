@@ -432,6 +432,10 @@ add_executable(nchat
   src/uihelpview.h
   src/uiaudioplayer.cpp
   src/uiaudioplayer.h
+  src/uiactivity.cpp
+  src/uiactivity.h
+  src/uidrafts.cpp
+  src/uidrafts.h
   src/uihistoryview.cpp
   src/uihistoryview.h
   src/uiimagepreview.cpp

@@ -88,6 +88,7 @@ void UiPrefsDialog::BuildItems()
   choice("Pin chats", "pin_local", false, { { "1", "locally only" }, { "0", "on the service" } });
   choice("Desktop notifications", "desktop_notify_enabled", false, s_OnOff);
   choice("Reactions", "reactions_enabled", false, s_OnOff);
+  choice("Activity animations", "activity_animations", false, s_OnOff);
 
   header("Accounts  (Enter: pinned only, +/-: move)");
   for (const auto& profileId : m_Model->GetOrderedProfileIds())

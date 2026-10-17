@@ -66,7 +66,8 @@ bool IgChat::HasFeature(ProtocolFeature p_ProtocolFeature) const
   static int customFeatures =
     FeatureEditMessagesWithinFifteenMins |
     FeatureAutoGetContactsOnLogin |
-    FeaturePinChat;
+    FeaturePinChat |
+    FeatureSendAcknowledgement;
   return (p_ProtocolFeature & customFeatures);
 }
 
@@ -483,6 +484,7 @@ void IgChat::PerformRequest(std::shared_ptr<RequestMessage> p_RequestMessage)
         sendMessageNotify->success = (rv == 0);
         sendMessageNotify->chatId = sendMessageRequest->chatId;
         sendMessageNotify->chatMessage = sendMessageRequest->chatMessage;
+        sendMessageNotify->clientRequestId = sendMessageRequest->clientRequestId;
         CallMessageHandler(sendMessageNotify);
       }
       break;

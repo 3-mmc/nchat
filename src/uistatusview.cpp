@@ -42,6 +42,8 @@ void UiStatusView::Draw()
   if (!currentChat.first.empty() || !currentChat.second.empty())
   {
     std::wstring wextra = StrUtil::ToWString(m_Model->GetChatStatusLocked(currentChat.first, currentChat.second));
+    const auto activity = m_Model->GetChatActivityLocked(currentChat.first, currentChat.second);
+    if (!activity.label.empty()) wextra = StrUtil::ToWString(activity.label) + wextra;
 
     static const bool developerMode = AppUtil::GetDeveloperMode();
     if (developerMode)

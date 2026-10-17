@@ -141,10 +141,12 @@ void UiListView::Draw()
 
       mvwaddnwstr(m_PaddedWin, y, markerW, wname.c_str(), wname.size());
 
-      if (unreads[i])
+      const auto activity = m_Model->GetChatActivityLocked(p_ChatVec[i].first, p_ChatVec[i].second);
+      if (unreads[i] || !activity.marker.empty())
       {
         static const std::string unreadIndicator = " " + UiConfig::GetStr("unread_indicator");
-        static const std::wstring wunread = StrUtil::ToWString(unreadIndicator);
+        const std::wstring wunread = activity.marker.empty() ? StrUtil::ToWString(unreadIndicator) :
+          (L" " + activity.marker);
         mvwaddnwstr(m_PaddedWin, y, (m_PaddedW - StrUtil::WStringWidth(wunread)), wunread.c_str(), wunread.size());
 
         wattron(m_PaddedWin, colorPair);

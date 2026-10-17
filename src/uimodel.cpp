@@ -36,6 +36,7 @@
 #include "uicontroller.h"
 #include "uiemojilistdialog.h"
 #include "uifilelistdialog.h"
+#include "uihelpview.h"
 #include "uikeyconfig.h"
 #include "uikeyinput.h"
 #include "uimessagedialog.h"
@@ -66,12 +67,61 @@ void UiModel::Impl::Init()
   LoadLocalArchive();
   LoadLocalPins();
   LoadTabs();
+  LoadDrafts();
   ApplyPreferences();
 }
 
 void UiModel::Impl::Cleanup()
 {
+  SaveDrafts();
   UiAudioPlayer::Stop();
+}
+
+void UiModel::Impl::LoadDrafts()
+{
+  m_SavedDrafts = UiDrafts::Load(FileUtil::GetApplicationDir() + "/drafts.txt");
+  for (const auto& draft : m_SavedDrafts)
+  {
+    m_EntryStr[draft.first.first][draft.first.second] = draft.second.first;
+    m_EntryPos[draft.first.first][draft.first.second] = draft.second.second;
+  }
+}
+
+void UiModel::Impl::SaveDrafts()
+{
+  UiDrafts::Store drafts;
+  for (const auto& profile : m_EntryStr)
+  {
+    for (const auto& entry : profile.second)
+    {
+      const auto chat = std::make_pair(profile.first, entry.first);
+      // An edit of an existing message must never become a new-message draft.
+      if (GetEditMessageActive() && (chat == m_CurrentChat))
+      {
+        const auto saved = m_SavedDrafts.find(chat);
+        if (saved != m_SavedDrafts.end()) drafts.emplace(*saved);
+      }
+      else if (!entry.second.empty())
+      {
+        drafts[chat] = { entry.second, m_EntryPos[profile.first][entry.first] };
+      }
+    }
+  }
+  if (drafts == m_SavedDrafts) return;
+  if (UiDrafts::Save(FileUtil::GetApplicationDir() + "/drafts.txt", drafts)) m_SavedDrafts = drafts;
+  else LOG_WARNING("could not save drafts");
+}
+
+void UiModel::Impl::OnKeyRetrySend()
+{
+  AnyUserKeyInput();
+  auto failed = m_FailedSends.find(m_CurrentChat);
+  if ((failed == m_FailedSends.end()) || failed->second.empty()) return;
+  if (!m_Protocols.count(m_CurrentChat.first)) return;
+  auto request = std::make_shared<SendMessageRequest>(failed->second.front());
+  failed->second.pop_front();
+  if (failed->second.empty()) m_FailedSends.erase(failed);
+  SendProtocolRequest(m_CurrentChat.first, request);
 }
 
 void UiModel::Impl::AnyUserKeyInput()
@@ -213,6 +263,7 @@ void UiModel::Impl::SendMessage()
 
   entryStr.clear();
   entryPos = 0;
+  SaveDrafts();
 
   AddTab(m_CurrentChat); // chats written in get a tab
 
@@ -1808,6 +1859,7 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         if (newMessagesNotify->success)
         {
           bool hasNewMessage = false;
+          bool freshIncoming = false;
           const std::string& chatId = newMessagesNotify->chatId;
           if (IsChatForceHidden(chatId)) return;
           if (m_ChatInfos[profileId].count(chatId) && m_ChatInfos[profileId][chatId].isArchived) return;
@@ -1836,6 +1888,16 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
             if (messages.insert({ chatMessage.id, chatMessage }).second)
             {
               messageVec.push_back(chatMessage.id);
+              const auto connected = m_ConnectTime.find(profileId);
+              // Live Go-bridge events also set sequence=true. Freshness comes
+              // from the connection time and a genuinely new incoming ID.
+              if (!newMessagesNotify->cached && !chatMessage.isEdited && !chatMessage.isDeleted &&
+                  !chatMessage.isOutgoing && !chatMessage.isRead &&
+                  (connected != m_ConnectTime.end()) && (m_ProfileConnState[profileId] == "connected") &&
+                  (chatMessage.timeSent >= connected->second))
+              {
+                freshIncoming = true;
+              }
             }
             else
             {
@@ -1923,6 +1985,15 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
           UpdateChatInfoIsUnread(profileId, chatId);
           SortChats();
           UpdateList();
+          const auto chat = std::make_pair(profileId, chatId);
+          const bool visible = (chat == m_CurrentChat) || (m_View->HasSplitView() && (chat == m_SplitChat));
+          // The incoming event itself is unread. The chat summary can still
+          // refer to a read message with an identical backend timestamp.
+          if (freshIncoming && !visible && !IsChatLocalArchived(profileId, chatId) &&
+              UiConfig::GetBool("activity_animations"))
+          {
+            m_Activity.Incoming(chat, UiActivity::Now());
+          }
           HomeFetchNext(profileId, chatId, (int)chatMessages.size());
         }
       }
@@ -1933,6 +2004,24 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         std::shared_ptr<SendMessageNotify> sendMessageNotify = std::static_pointer_cast<SendMessageNotify>(
           p_ServiceMessage);
         LOG_TRACE(sendMessageNotify->success ? "send ok" : "send failed");
+        if (HasProtocolFeature(profileId, FeatureSendAcknowledgement))
+        {
+          if (m_Activity.FinishSend(std::make_pair(profileId, sendMessageNotify->chatId),
+                                    sendMessageNotify->clientRequestId, sendMessageNotify->success, UiActivity::Now()))
+          {
+            const auto pending = m_PendingSends.find(sendMessageNotify->clientRequestId);
+            if (pending != m_PendingSends.end())
+            {
+              const auto chat = pending->second.chat;
+              if (!sendMessageNotify->success) m_FailedSends[chat].push_back(pending->second.request);
+              m_PendingSends.erase(pending);
+              const auto failed = m_FailedSends.find(chat);
+              m_Activity.SetFailureCount(chat, failed == m_FailedSends.end() ? 0 : failed->second.size());
+            }
+            UpdateList();
+            UpdateStatus();
+          }
+        }
       }
       break;
 
@@ -2172,6 +2261,17 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         {
           std::string chatId = deleteChatNotify->chatId;
           LOG_TRACE("chat deleted %s", chatId.c_str());
+          const auto deleted = std::make_pair(profileId, chatId);
+          m_Activity.RemoveChat(deleted);
+          m_FailedSends.erase(deleted);
+          for (auto it = m_PendingSends.begin(); it != m_PendingSends.end();)
+          {
+            if (it->second.chat == deleted) it = m_PendingSends.erase(it);
+            else ++it;
+          }
+          m_EntryStr[profileId].erase(chatId);
+          m_EntryPos[profileId].erase(chatId);
+          SaveDrafts();
           if (m_SplitChat == std::make_pair(profileId, chatId))
           {
             m_SplitEnabled = false;
@@ -2223,6 +2323,28 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         if (!chatInfos.count(chatId)) return;
 
         LOG_TRACE("chat moved %s to %s", chatId.c_str(), newChatId.c_str());
+        m_Activity.MoveChat(std::make_pair(profileId, chatId), std::make_pair(profileId, newChatId));
+        if (chatId != newChatId)
+        {
+          const auto oldChat = std::make_pair(profileId, chatId);
+          const auto newChat = std::make_pair(profileId, newChatId);
+          const auto failed = m_FailedSends.find(oldChat);
+          if (failed != m_FailedSends.end())
+          {
+            for (auto request : failed->second)
+            {
+              request.chatId = newChatId;
+              m_FailedSends[newChat].push_back(request);
+            }
+            m_FailedSends.erase(failed);
+          }
+          for (auto& pending : m_PendingSends)
+          {
+            if (pending.second.chat != oldChat) continue;
+            pending.second.chat = newChat;
+            pending.second.request.chatId = newChatId;
+          }
+        }
         if (m_SplitChat == std::make_pair(profileId, chatId)) m_SplitChat.second = newChatId;
         if (m_LastCurrentChat == std::make_pair(profileId, chatId)) m_LastCurrentChat.second = newChatId;
         const auto oldPin = m_LocalPins.find(std::make_pair(profileId, chatId));
@@ -2276,6 +2398,7 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
 
         m_EntryStr[profileId].erase(chatId);
         m_EntryPos[profileId].erase(chatId);
+        SaveDrafts();
 
         // reset message state, to fetch merged messages from cache
         for (const std::string& id : { chatId, newChatId })
@@ -2564,6 +2687,24 @@ bool UiModel::Impl::Process()
 
 void UiModel::Impl::ProcessTimers()
 {
+  const int64_t activityNow = UiActivity::Now();
+  if ((activityNow - m_LastDraftSave) >= 1000)
+  {
+    m_LastDraftSave = activityNow;
+    SaveDrafts();
+  }
+  if ((activityNow - m_LastActivityTick) >= 200)
+  {
+    m_LastActivityTick = activityNow;
+    if (m_Activity.HasWork())
+    {
+      m_Activity.Prune(activityNow);
+      // Update only indicator rows. History and draft contents do not animate.
+      m_View->SetListDirty(true);
+      m_View->SetTopDirty(true);
+      m_View->SetStatusDirty(true);
+    }
+  }
   static int64_t lastTimeMs = TimeUtil::GetCurrentTimeMSec();
   int64_t nowTimeMs = TimeUtil::GetCurrentTimeMSec();
   int64_t elapsedMs = nowTimeMs - lastTimeMs;
@@ -2875,6 +3016,18 @@ bool UiModel::Impl::GetChatIsPinned(const std::string& p_ProfileId, const std::s
   return (chat != profile->second.end()) && chat->second.isPinned;
 }
 
+UiActivityState UiModel::Impl::GetChatActivity(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  auto state = m_Activity.GetState(std::make_pair(p_ProfileId, p_ChatId), UiActivity::Now(),
+                                  UiConfig::GetBool("activity_animations"));
+  const auto failed = m_FailedSends.find(std::make_pair(p_ProfileId, p_ChatId));
+  if ((failed != m_FailedSends.end()) && !failed->second.empty())
+  {
+    state.label += " [" + UiHelpView::GetKeyDisplay("retry_send") + " Retry]";
+  }
+  return state;
+}
+
 std::string UiModel::Impl::GetChatStatus(const std::string& p_ProfileId, const std::string& p_ChatId)
 {
   std::string chatStatus;
@@ -3004,6 +3157,8 @@ void UiModel::Impl::OnCurrentChatChanged()
     ReinitView();
   }
   m_LastCurrentChat = m_CurrentChat;
+  m_Activity.ClearFresh(m_CurrentChat);
+  if (m_View->HasSplitView()) m_Activity.ClearFresh(m_SplitChat);
   LOG_TRACE("current chat %s %s", m_CurrentChat.first.c_str(), m_CurrentChat.second.c_str());
   SetHistoryInteraction(false);
   UpdateList();
@@ -3226,6 +3381,8 @@ void UiModel::Impl::SetRunning(bool p_Running)
 void UiModel::Impl::ReinitView()
 {
   m_View->Init();
+  m_Activity.ClearFresh(m_CurrentChat);
+  if (m_View->HasSplitView()) m_Activity.ClearFresh(m_SplitChat);
 }
 
 void UiModel::Impl::UpdateList()
@@ -3840,6 +3997,7 @@ void UiModel::Impl::StartEditMsg(const std::string& p_ProfileId, const std::stri
 {
   AnyUserKeyInput();
 
+  SaveDrafts();
   m_EditMessageId = p_MsgId;
   SetEditMessageActive(true);
 
@@ -4079,6 +4237,19 @@ void UiModel::Impl::SendProtocolRequest(const std::string& p_ProfileId, std::sha
     return;
   }
 
+  if ((p_Request->GetMessageType() == SendMessageRequestType) &&
+      HasProtocolFeature(p_ProfileId, FeatureSendAcknowledgement))
+  {
+    const auto send = std::static_pointer_cast<SendMessageRequest>(p_Request);
+    send->clientRequestId = ++m_NextSendRequestId;
+    const auto chat = std::make_pair(p_ProfileId, send->chatId);
+    m_PendingSends[send->clientRequestId] = { chat, *send };
+    m_Activity.BeginSend(chat, send->clientRequestId, UiActivity::Now());
+    const auto failed = m_FailedSends.find(chat);
+    m_Activity.SetFailureCount(chat, failed == m_FailedSends.end() ? 0 : failed->second.size());
+    UpdateStatus();
+    UpdateList();
+  }
   m_Protocols[p_ProfileId]->SendRequest(p_Request);
 }
 
@@ -5293,6 +5464,7 @@ void UiModel::KeyHandler(wint_t p_Key)
   static wint_t keyHome = UiKeyConfig::GetKey("home");
 
   static wint_t keySendMsg = UiKeyConfig::GetKey("send_msg");
+  static wint_t keyRetrySend = UiKeyConfig::GetKey("retry_send");
   static wint_t keyNextChat = UiKeyConfig::GetKey("next_chat");
   static wint_t keyPrevChat = UiKeyConfig::GetKey("prev_chat");
   static wint_t keyUnreadChat = UiKeyConfig::GetKey("unread_chat");
@@ -5455,6 +5627,11 @@ void UiModel::KeyHandler(wint_t p_Key)
   {
     std::unique_lock<owned_mutex> lock(m_ModelMutex);
     GetImpl().OnKeySendMsg();
+  }
+  else if (p_Key == keyRetrySend)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    GetImpl().OnKeyRetrySend();
   }
   else if (p_Key == keyExtEdit)
   {
@@ -6096,6 +6273,12 @@ bool UiModel::GetChatIsPinnedLocked(const std::string& p_ProfileId, const std::s
 {
   nc_assert(m_ModelMutex.owns_lock());
   return GetImpl().GetChatIsPinned(p_ProfileId, p_ChatId);
+}
+
+UiActivityState UiModel::GetChatActivityLocked(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetChatActivity(p_ProfileId, p_ChatId);
 }
 
 void UiModel::OnKeyGotoChat()

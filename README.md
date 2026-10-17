@@ -5,7 +5,8 @@ nchat
 > It adds Instagram DMs (via [mautrix-meta](https://github.com/mautrix/meta)'s
 > instameow, build with `-DHAS_INSTAGRAM=ON`), inline image / video thumbnail
 > previews (chafa), inline voice note playback (ffplay), protocol views,
-> Signal pinned-only mode, local archive and a reworked help bar.
+> local chat pins and archive, tabs, split panes with independent composers,
+> saved drafts, message activity indicators, failed-send retries and preferences.
 > See [doc/FORK.md](doc/FORK.md) for details.
 >
 > **Licence note:** mautrix-meta is AGPL-3.0. nchat itself stays MIT, but a

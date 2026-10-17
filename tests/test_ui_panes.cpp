@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <clocale>
+#include <chrono>
+#include <thread>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -12,14 +14,16 @@
 #include "appconfig.h"
 #include "fileutil.h"
 #include "strutil.h"
+#include "timeutil.h"
 #include "uicolorconfig.h"
 #include "uiconfig.h"
 #include "uihelpview.h"
 #include "uikeyconfig.h"
 #include "uikeyinput.h"
 #include "uimodel.h"
+#include "uidrafts.h"
 
-struct Sent { std::string profile, chat, text; };
+struct Sent { std::string profile, chat, text; uint64_t id; };
 static std::vector<Sent> sent;
 static std::string s_CheckDir;
 static void Check(bool ok, const std::string& message) { if (!ok) throw std::runtime_error(message); }
@@ -30,7 +34,7 @@ public:
   explicit Fake(std::string value) : id(value) {}
   std::string GetProfileId() const override { return id; }
   std::string GetProfileDisplayName() const override { return ""; }
-  bool HasFeature(ProtocolFeature) const override { return false; }
+  bool HasFeature(ProtocolFeature feature) const override { return feature == FeatureSendAcknowledgement; }
   bool IsGroupChat(const std::string&) const override { return false; }
   std::string GetSelfId() const override { return "self"; }
   bool SetupProfile(const std::string&, std::string&) override { return false; }
@@ -43,7 +47,7 @@ public:
     if (request->GetMessageType() == SendMessageRequestType)
     {
       auto send = std::static_pointer_cast<SendMessageRequest>(request);
-      sent.push_back({id, send->chatId, send->chatMessage.text});
+      sent.push_back({id, send->chatId, send->chatMessage.text, send->clientRequestId});
     }
   }
   void SetMessageHandler(const std::function<void(std::shared_ptr<ServiceMessage>)>&) override {}
@@ -109,6 +113,47 @@ static void CheckSend(size_t count, const std::string& profile, const std::strin
   Check(sent.size() == count, "one send request per nonempty draft");
   Check(sent.back().profile == profile && sent.back().chat == "same-chat-id" && sent.back().text == text,
         "send uses focused pane's account, chat and draft");
+}
+static void Ack(UiModel& model, const Sent& message, bool success)
+{
+  auto notify = std::make_shared<SendMessageNotify>(message.profile);
+  notify->chatId = message.chat;
+  notify->clientRequestId = message.id;
+  notify->success = success;
+  model.MessageHandler(notify);
+  model.Draw();
+}
+static void Incoming(UiModel& model, const std::string& profile, const std::string& id, bool cached = false,
+                     int64_t timeSent = 0)
+{
+  auto notify = std::make_shared<NewMessagesNotify>(profile);
+  notify->success = true;
+  notify->cached = cached;
+  notify->sequence = true; // matches live WhatsApp/Signal/Instagram bridge events
+  notify->chatId = "same-chat-id";
+  ChatMessage message;
+  message.id = id;
+  message.senderId = "same-chat-id";
+  message.text = "Incoming test";
+  message.isOutgoing = false;
+  message.isRead = false;
+  message.timeSent = timeSent ? timeSent : TimeUtil::GetCurrentTimeMSec() + 1;
+  notify->chatMessages.push_back(message);
+  model.MessageHandler(notify);
+  model.Draw();
+}
+static bool Pulsing(const std::wstring& row)
+{
+  return row.find(L"\u25cf") != std::wstring::npos || row.find(L"\u25cb") != std::wstring::npos;
+}
+static bool ChatPulse(const std::wstring& name)
+{
+  for (int y = 1; y < LINES - 1; ++y)
+  {
+    const auto row = Line(y, 0, 22);
+    if (row.find(name) != std::wstring::npos) return Pulsing(row);
+  }
+  return false;
 }
 static void Snapshot(const std::string& name)
 {
@@ -224,8 +269,112 @@ int main(int argc, char** argv)
     model.Draw();
     Check(Line(34).find(L"Draft for Alice") == std::wstring::npos && Line(34).find(L"To Bob") != std::wstring::npos, "deleting inactive chat removes its composer safely");
     Check(UiHelpView::GetKeyDisplay("focus_pane") == "F6", "function-key help label");
+    // Acknowledgements are correlated to each request, not inferred from echoes.
+    for (const auto& message : sent) Ack(model, message, true);
+    Select(model, L"Carol");
+    Key(model, "toggle_tab");
+    Select(model, L"Bob");
+    auto connected = std::make_shared<ConnectNotify>("Instagram_test");
+    connected->success = true;
+    model.MessageHandler(connected);
+    Incoming(model, "Instagram_test", "fresh");
+    Check(ChatPulse(L"Carol") && Pulsing(Line(0, 23)), "fresh hidden chat pulses in sidebar and tab");
+    Select(model, L"Carol");
+    Check(!ChatPulse(L"Carol"), "opening chat clears pulse");
+    Select(model, L"Bob");
+    Incoming(model, "Instagram_test", "fresh");
+    Check(!ChatPulse(L"Carol"), "duplicate incoming update does not restart pulse");
+    Incoming(model, "Instagram_test", "cached", true);
+    Check(!ChatPulse(L"Carol"), "cached history does not animate");
+    Incoming(model, "Instagram_test", "backfill", false, TimeUtil::GetCurrentTimeMSec() - 60000);
+    Check(!ChatPulse(L"Carol"), "old noncached history does not animate");
+    Key(model, "toggle_split");
+    auto bobConnected = std::make_shared<ConnectNotify>("WhatsAppMd_test");
+    bobConnected->success = true;
+    model.MessageHandler(bobConnected);
+    Incoming(model, "WhatsAppMd_test", "visible-other");
+    Check(!ChatPulse(L"Bob"), "other visible split pane does not pulse");
+    Resize(model, 40);
+    Incoming(model, "WhatsAppMd_test", "hidden-other");
+    Check(ChatPulse(L"Bob"), "hidden pane in a narrow terminal gets fresh activity");
+    Resize(model, 120);
+    Check(!ChatPulse(L"Bob"), "restoring visible pane clears fresh activity");
+    Key(model, "toggle_split");
+    Select(model, L"Bob");
+    Type(model, "delayed send");
+    Key(model, "send_msg");
+    const Sent delayed = sent.back();
+    Check(delayed.id != 0, "send request has correlation ID");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1600));
+    model.Process();
+    Check(Line(LINES - 7, 23).find(L"Sending") != std::wstring::npos, "slow send shows progress after delay");
+    Sent wrong = delayed;
+    wrong.profile = "Instagram_test";
+    Ack(model, wrong, true);
+    Check(Line(LINES - 7, 23).find(L"Sending") != std::wstring::npos, "wrong account acknowledgement cannot finish send");
+    Ack(model, delayed, true);
+    Check(Line(LINES - 7, 23).find(L"Sent") != std::wstring::npos &&
+          Line(LINES - 7, 23).find(L"Sending") == std::wstring::npos, "actual acknowledgement ends progress");
+    Type(model, "failed send");
+    Key(model, "send_msg");
+    Ack(model, sent.back(), false);
+    Check(Line(LINES - 7, 23).find(L"Send failed") != std::wstring::npos, "failure is visible and stops spinner");
+    const Sent failed = sent.back();
+    Type(model, "keep this draft");
+    const size_t beforeRetry = sent.size();
+    Select(model, L"Carol");
+    Key(model, "retry_send");
+    Check(sent.size() == beforeRetry, "retry never sends another chat's failed message");
+    Select(model, L"Bob");
+    Key(model, "retry_send");
+    Check(sent.size() == beforeRetry + 1 && sent.back().text == failed.text &&
+          sent.back().profile == failed.profile && sent.back().chat == failed.chat &&
+          sent.back().id != failed.id, "F7 retries original message with a new request ID");
+    Check(Line(35, 23).find(L"keep this draft") == 0, "retry preserves new composer draft");
+    const Sent retried = sent.back();
+    Key(model, "retry_send");
+    Check(sent.size() == beforeRetry + 1, "repeated F7 never duplicates an in-flight retry");
+    Ack(model, retried, false);
+    Check(Line(LINES - 7, 23).find(L"F7 Retry") != std::wstring::npos, "retry failure restores shortcut hint");
+    Key(model, "retry_send");
+    Ack(model, sent.back(), true);
+    Ack(model, failed, false);
+    Key(model, "retry_send");
+    Check(sent.size() == beforeRetry + 2, "success and stale acknowledgements cannot enqueue extra retries");
+    UiConfig::SetBool("activity_animations", false);
+    Incoming(model, "Instagram_test", "reduced-motion");
+    Check(!ChatPulse(L"Carol"), "animation preference leaves unread activity static");
+    // Timer checkpoint saves both accounts even though their chat IDs match.
+    Select(model, L"Carol");
+    Type(model, "other account draft");
+    Select(model, L"Bob");
+    Key(model, "left");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1050));
+    model.Process();
+    auto saved = UiDrafts::Load(dir + "/drafts.txt");
+    Check(saved.at({"WhatsAppMd_test", "same-chat-id"}).first == L"keep this draft" &&
+          saved.at({"Instagram_test", "same-chat-id"}).first == L"other account draft",
+          "timer checkpoints drafts without account collisions");
+    Type(model, "?");
     model.Cleanup();
-    std::cout << "PASS: full-height sidebar, per-pane drafts, F6 focus, actual send routing for both accounts, empty draft safety, tab selection, swap, narrow resize, close/reopen, hidden sidebar and deletion\n";
+    saved = UiDrafts::Load(dir + "/drafts.txt");
+    Check(saved.at({"WhatsAppMd_test", "same-chat-id"}).first == L"keep this draf?t" &&
+          saved.at({"WhatsAppMd_test", "same-chat-id"}).second == 15, "cleanup saves draft and cursor");
+    UiModel reopened;
+    reopened.Init();
+    Seed(reopened, "WhatsAppMd_test", "Bob", 200);
+    Seed(reopened, "Instagram_test", "Carol", 100);
+    Select(reopened, L"Carol");
+    Check(Line(35, 23).find(L"other account draft") == 0, "other account draft restored separately");
+    Select(reopened, L"Bob");
+    Check(Line(35, 23).find(L"keep this draf?t") == 0, "draft restored after restart");
+    Type(reopened, "!");
+    Key(reopened, "send_msg");
+    Check(sent.back().text == "keep this draf?!t", "restored cursor used when composing");
+    Check(UiDrafts::Load(dir + "/drafts.txt").count({"WhatsAppMd_test", "same-chat-id"}) == 0,
+          "sending immediately removes persisted draft");
+    reopened.Cleanup();
+    std::cout << "PASS: full-height sidebar, per-pane drafts, F6 focus, actual send routing for both accounts, empty draft safety, tab selection, swap, narrow resize, close/reopen, hidden sidebar, deletion, fresh activity, delayed send acknowledgements, failed-send retry and persistent drafts\n";
   }
   catch (const std::exception& error)
   {

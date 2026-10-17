@@ -33,6 +33,13 @@ endmacro()
 # Unit tests
 add_unit_test(test001)
 add_unit_test(test002)
+add_unit_test(test003)
+target_sources(test003 PRIVATE ../src/uiactivity.cpp)
+target_include_directories(test003 PRIVATE ../src)
+
+add_unit_test(test004)
+target_sources(test004 PRIVATE ../src/uidrafts.cpp)
+target_include_directories(test004 PRIVATE ../src)
 
 # The UI test uses fake accounts and ncurses' off-screen terminal. It reuses
 # nchat's built objects so its send-routing assertions exercise the real model.

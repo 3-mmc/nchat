@@ -115,8 +115,10 @@ void UiTopView::Draw()
       const bool isCurrent = (tab == currentChat);
       const bool isSplit = splitEnabled && (tab == splitChat);
       const bool isUnread = !isCurrent && m_Model->GetChatIsUnreadLocked(tab.first, tab.second);
+      const auto activity = m_Model->GetChatActivityLocked(tab.first, tab.second);
+      const std::wstring activityMarker = activity.marker.empty() ? (isUnread ? L"\u2022" : L"") : activity.marker;
       const std::wstring wnum = std::to_wstring(i + 1);
-      const std::wstring wtab = L" " + wnum + L" " + wname + (isUnread ? L"\u2022" : L"") + // •
+      const std::wstring wtab = L" " + wnum + L" " + wname + activityMarker +
         (isSplit ? L" \u25e8" : L"") + L" "; // ◨
       const int tabW = StrUtil::WStringWidth(wtab) + (showProtocol ? 1 : 0);
       if ((x + tabW) > maxX) break;

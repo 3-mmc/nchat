@@ -8,6 +8,7 @@
 #pragma once
 
 #include <map>
+#include <deque>
 #include <mutex>
 #include <set>
 #include <stack>
@@ -18,6 +19,8 @@
 #include "apputil.h"
 #include "owned_mutex.h"
 #include "protocol.h"
+#include "uiactivity.h"
+#include "uidrafts.h"
 
 class UiView;
 
@@ -43,6 +46,9 @@ private:
     void OnKeyToggleEmoji();
     void OnKeySendMsg();
     void SendMessage();
+    void OnKeyRetrySend();
+    void LoadDrafts();
+    void SaveDrafts();
     void OnKeyOtherCommandsHelp();
     void EntryKeyHandler(wint_t p_Key);
     void SetTyping(const std::string& p_ProfileId, const std::string& p_ChatId, bool p_IsTyping);
@@ -133,6 +139,7 @@ private:
     int64_t GetLastMessageTime(const std::string& p_ProfileId, const std::string& p_ChatId);
     bool GetChatIsUnread(const std::string& p_ProfileId, const std::string& p_ChatId);
     bool GetChatIsPinned(const std::string& p_ProfileId, const std::string& p_ChatId);
+    UiActivityState GetChatActivity(const std::string& p_ProfileId, const std::string& p_ChatId);
     std::string GetChatStatus(const std::string& p_ProfileId, const std::string& p_ChatId);
 
     std::wstring& GetEntryStr(bool p_Split = false);
@@ -305,6 +312,18 @@ private:
     static const std::pair<std::string, std::string> s_ChatNone;
 
     std::string m_EditMessageId;
+    UiActivity m_Activity;
+    UiDrafts::Store m_SavedDrafts;
+    int64_t m_LastDraftSave = 0;
+    struct PendingSend
+    {
+      UiActivity::Chat chat;
+      SendMessageRequest request;
+    };
+    std::map<uint64_t, PendingSend> m_PendingSends;
+    std::map<UiActivity::Chat, std::deque<SendMessageRequest>> m_FailedSends;
+    uint64_t m_NextSendRequestId = 0;
+    int64_t m_LastActivityTick = 0;
     std::string m_ProtocolUiControl;
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<std::string>>> m_MessageVec;
@@ -395,6 +414,7 @@ public:
   // Locked methods require caller to hold model mutex (intended for Ui*View classes)
   bool GetChatIsUnreadLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   bool GetChatIsPinnedLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
+  UiActivityState GetChatActivityLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetChatStatusLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetListViewLabelLocked();
   std::vector<std::pair<std::string, std::string>> GetTabsLocked();

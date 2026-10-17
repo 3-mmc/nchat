@@ -142,6 +142,7 @@ void UiHelpView::Draw()
     AppendHelpItem("toggle_split", "Split", helpItems);
     AppendHelpItem("swap_split", "SwapSplit", helpItems);
     AppendHelpItem("focus_pane", "FocusPane", helpItems);
+    AppendHelpItem("retry_send", "RetrySend", helpItems);
     AppendHelpItem("preferences", "Prefs", helpItems);
     AppendHelpItem("unread_chat", "Unread", helpItems);
     AppendHelpItem("select_mention", "Mention", helpItems);

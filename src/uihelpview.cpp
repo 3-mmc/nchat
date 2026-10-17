@@ -66,43 +66,31 @@ void UiHelpView::Draw()
   static std::vector<std::wstring> editMessageHelpItems = []()
   {
     std::vector<std::wstring> helpItems;
-    AppendHelpItem("send_msg", "Save", helpItems);
     AppendHelpItem("cancel", "Cancel", helpItems);
+    AppendHelpItem("begin_line", "LineStart", helpItems);
+    AppendHelpItem("end_line", "LineEnd", helpItems);
+    AppendHelpItem("delete_line_before_cursor", "DelToStart", helpItems);
+    AppendHelpItem("delete_line_after_cursor", "DelToEnd", helpItems);
     return helpItems;
   }();
 
   static std::vector<std::wstring> mainPreHelpItems = []()
   {
     std::vector<std::wstring> helpItems;
-    AppendHelpItem("send_msg", "SendMsg", helpItems);
-    AppendHelpItem("next_chat", "NextChat", helpItems);
-    AppendHelpItem("unread_chat", "JumpUnrd", helpItems);
-
-    AppendHelpItem("quit", "Quit", helpItems);
-    AppendHelpItem("select_emoji", "AddEmoji", helpItems);
-    AppendHelpItem("goto_chat", "GotoChat", helpItems);
-    AppendHelpItem("transfer", "SendFile", helpItems);
-
+    // send / reply / save is shown at the right of the status bar
     return helpItems;
   }();
 
   static std::vector<std::wstring> mainPostHelpItems = []()
   {
     std::vector<std::wstring> helpItems;
+    AppendHelpItem("quit", "Quit", helpItems);
     AppendHelpItem("ext_edit", "ExtEdit", helpItems);
     AppendHelpItem("ext_call", "ExtCall", helpItems);
-    AppendHelpItem("find", "Find", helpItems);
-    AppendHelpItem("find_next", "FindNext", helpItems);
-    AppendHelpItem("select_contact", "AddrBook", helpItems);
-    AppendHelpItem("select_mention", "Mention", helpItems);
     AppendHelpItem("spell", "ExtSpell", helpItems);
     AppendHelpItem("auto_compose", "AutoComp", helpItems);
     AppendHelpItem("decrease_list_width", "DecListW", helpItems);
     AppendHelpItem("increase_list_width", "IncListW", helpItems);
-
-    AppendHelpItem("cut", "Cut", helpItems);
-    AppendHelpItem("copy", "Copy", helpItems);
-    AppendHelpItem("paste", "Paste", helpItems);
 
     AppendHelpItem("toggle_emoji", "TgEmoji", helpItems);
     AppendHelpItem("toggle_list", "TgList", helpItems);
@@ -117,19 +105,19 @@ void UiHelpView::Draw()
     std::vector<std::wstring> helpItems;
     helpItems.insert(std::end(helpItems), std::begin(mainPreHelpItems), std::end(mainPreHelpItems));
 
-    AppendHelpItem("up", "PrevMsg", helpItems);
-    AppendHelpItem("down", "NextMsg", helpItems);
-
-    AppendHelpItem("delete_msg", "DelMsg", helpItems);
-    AppendHelpItem("edit_msg", "EditMsg", helpItems);
-    AppendHelpItem("open", "OpenFile", helpItems);
+    AppendHelpItem("up", "Older", helpItems);
+    AppendHelpItem("down", "Newer", helpItems);
+    AppendHelpItem("react", "React", helpItems);
+    AppendHelpItem("open", "Open", helpItems);
+    AppendHelpItem("play_audio", "Voice", helpItems);
+    AppendHelpItem("copy", "Copy", helpItems);
+    AppendHelpItem("forward_msg", "Fwd", helpItems);
+    AppendHelpItem("edit_msg", "Edit", helpItems);
+    AppendHelpItem("delete_msg", "Delete", helpItems);
     AppendHelpItem("save", "SaveFile", helpItems);
-    AppendHelpItem("open_link", "OpenLink", helpItems);
-
-    AppendHelpItem("jump_quoted", "JumpQuoted", helpItems);
-    AppendHelpItem("react", "AddReact", helpItems);
+    AppendHelpItem("open_link", "Link", helpItems);
+    AppendHelpItem("jump_quoted", "Quoted", helpItems);
     AppendHelpItem("open_msg", "ExtView", helpItems);
-    AppendHelpItem("forward_msg", "FwdMsg", helpItems);
 
     helpItems.insert(std::end(helpItems), std::begin(mainPostHelpItems), std::end(mainPostHelpItems));
     return helpItems;
@@ -140,10 +128,26 @@ void UiHelpView::Draw()
     std::vector<std::wstring> helpItems;
     helpItems.insert(std::end(helpItems), std::begin(mainPreHelpItems), std::end(mainPreHelpItems));
 
+    AppendHelpItem("next_chat", "NextChat", helpItems);
+    AppendHelpItem("select_contact", "OpenChat", helpItems);
+    AppendHelpItem("find", "Find", helpItems);
     AppendHelpItem("up", "SelectMsg", helpItems);
-    AppendHelpItem("delete_chat", "DelChat", helpItems);
-    AppendHelpItem("archive_chat", "ArcChat", helpItems);
+    AppendHelpItem("transfer", "SendFile", helpItems);
+    AppendHelpItem("select_emoji", "Emoji", helpItems);
+    AppendHelpItem("paste", "Paste", helpItems);
+    AppendHelpItem("play_audio", "Voice", helpItems);
+    AppendHelpItem("cycle_list_view", "View", helpItems);
+    AppendHelpItem("unread_chat", "Unread", helpItems);
+    AppendHelpItem("select_mention", "Mention", helpItems);
+    AppendHelpItem("find_next", "FindNext", helpItems);
+    AppendHelpItem("copy", "Copy", helpItems);
+    AppendHelpItem("cut", "Cut", helpItems);
+    AppendHelpItem("clear", "Clear", helpItems);
     AppendHelpItem("pin", "Pin", helpItems);
+    AppendHelpItem("archive_chat", "Archive", helpItems);
+    AppendHelpItem("toggle_pinned_only", "PinOnly", helpItems);
+    AppendHelpItem("goto_chat", "GotoChat", helpItems);
+    AppendHelpItem("delete_chat", "DelChat", helpItems);
 
     helpItems.insert(std::end(helpItems), std::begin(mainPostHelpItems), std::end(mainPostHelpItems));
     return helpItems;
@@ -277,10 +281,19 @@ std::string UiHelpView::GetKeyDisplay(const std::string& p_Func)
   else if (std::count(keyName.begin(), keyName.end(), '\\') == 2)
   {
     const std::string keyStr = StrUtil::StrFromOct(keyName);
+    static const std::string helpPrefixMeta = UiConfig::GetStr("help_prefix_meta");
     if ((keyStr.size() == 2) && (keyStr.at(0) == '\33') && StrUtil::IsValidTextKey(keyStr.at(1)))
     {
-      static const std::string helpPrefixMeta = UiConfig::GetStr("help_prefix_meta");
       return helpPrefixMeta + keyStr.substr(1);
+    }
+    else if ((keyStr.size() == 2) && (keyStr.at(0) == '\33') && ((keyStr.at(1) == '\r') || (keyStr.at(1) == '\n')))
+    {
+      return helpPrefixMeta + "\xe2\x8f\x8e"; // meta-enter
+    }
+    else if ((keyStr.size() == 2) && (keyStr.at(0) == '\33') && (keyStr.at(1) >= 1) && (keyStr.at(1) <= 26))
+    {
+      static const std::string helpPrefixCtrl = UiConfig::GetStr("help_prefix_ctrl");
+      return helpPrefixMeta + helpPrefixCtrl + std::string(1, (char)('A' + keyStr.at(1) - 1)); // ctrl-meta-letter
     }
   }
   else if (keyName == "KEY_RETURN")

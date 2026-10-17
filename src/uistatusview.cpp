@@ -11,6 +11,7 @@
 #include "strutil.h"
 #include "uicolorconfig.h"
 #include "uiconfig.h"
+#include "uihelpview.h"
 #include "uimodel.h"
 
 UiStatusView::UiStatusView(const UiViewParams& p_Params)
@@ -88,6 +89,20 @@ void UiStatusView::Draw()
     }
 
     wstatus = StrUtil::TrimPadWString(wstatus, m_W);
+  }
+
+  // send / reply / save hint, right-aligned (view filter is shown above the chat list)
+  static const std::string sendKey = UiHelpView::GetKeyDisplay("send_msg");
+  if (!sendKey.empty() && !(currentChat.first.empty() && currentChat.second.empty()))
+  {
+    const char* action = m_Model->GetEditMessageActiveLocked() ? "Save"
+      : (m_Model->GetSelectMessageActiveLocked() ? "Reply" : "Send");
+    const std::wstring whint = StrUtil::ToWString(sendKey + " " + action);
+    const int hintW = StrUtil::WStringWidth(whint);
+    if (hintW + 4 < m_W)
+    {
+      wstatus = StrUtil::TrimPadWString(wstatus, m_W - hintW - 1) + whint + L" ";
+    }
   }
 
   mvwaddnwstr(m_Win, 0, 0, wstatus.c_str(), wstatus.size());

@@ -19,6 +19,7 @@
 
 const static std::string userColor = "usercolor";
 static int colorPairId = 0;
+static int customColorId = 31; // palette entries 32..customColorId are redefined by hex colors
 
 void UiColorConfig::Init()
 {
@@ -187,6 +188,11 @@ int UiColorConfig::GetUserColorPair(const std::string& p_Param, const std::strin
   return colorPairs[userIdColor];
 }
 
+int UiColorConfig::GetLastCustomColorId()
+{
+  return customColorId;
+}
+
 bool UiColorConfig::IsUserColor(const std::string& p_Param)
 {
   return (m_Config.Get(p_Param + "_fg") == userColor) ||
@@ -266,8 +272,7 @@ int UiColorConfig::GetColorId(const std::string& p_Str)
     HexToRGB(p_Str, r, g, b);
     if ((r <= 255) && (g <= 255) && (b <= 255))
     {
-      static int colorId = 31;
-      colorId++;
+      int colorId = ++customColorId;
       if (colorId >= COLORS)
       {
         LOG_WARNING("max number of colors (%d) already defined, skipping \"%s\"",

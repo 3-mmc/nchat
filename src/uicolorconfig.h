@@ -21,6 +21,7 @@ public:
   static int GetUserColorPair(const std::string& p_Param, const std::string& p_UserId);
   static bool IsUserColor(const std::string& p_Param); // ex: "top_color"
   static int GetAttribute(const std::string& p_Param); // ex: "top_attr"
+  static int GetLastCustomColorId();
 
 private:
   static int GetColorId(const std::string& p_Str);

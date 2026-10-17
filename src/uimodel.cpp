@@ -29,6 +29,7 @@
 #include "timeutil.h"
 #include "uidialog.h"
 #include "uichatlistdialog.h"
+#include "uiaudioplayer.h"
 #include "uiconfig.h"
 #include "uicontactlistdialog.h"
 #include "uigroupmemberlistdialog.h"
@@ -59,10 +60,12 @@ UiModel::Impl::~Impl()
 void UiModel::Impl::Init()
 {
   m_View->Init();
+  LoadLocalArchive();
 }
 
 void UiModel::Impl::Cleanup()
 {
+  UiAudioPlayer::Stop();
 }
 
 void UiModel::Impl::AnyUserKeyInput()
@@ -1009,6 +1012,20 @@ void UiModel::Impl::OnKeyArchiveChat()
   const std::string& profileId = m_CurrentChat.first;
   const std::string& chatId = m_CurrentChat.second;
 
+  static const bool archiveLocal = UiConfig::GetBool("archive_local");
+  if (archiveLocal)
+  {
+    const std::pair<std::string, std::string> chat(profileId, chatId);
+    if (!m_LocalArchived.erase(chat))
+    {
+      m_LocalArchived.insert(chat);
+    }
+
+    SaveLocalArchive();
+    RebuildChatList();
+    return;
+  }
+
   bool isArchived = m_ChatInfos[profileId][chatId].isArchived;
   std::shared_ptr<ArchiveChatRequest> archiveChatRequest = std::make_shared<ArchiveChatRequest>();
   archiveChatRequest->chatId = chatId;
@@ -1201,6 +1218,14 @@ void UiModel::Impl::OpenLink(const std::string& p_Url)
 
 void UiModel::Impl::OpenAttachment(const std::string& p_Path)
 {
+  // voice notes / audio play inline in the background, toggled by the same key
+  if (UiAudioPlayer::IsEnabled() && UiAudioPlayer::IsAudio(p_Path))
+  {
+    UiAudioPlayer::Toggle(p_Path);
+    UpdateHistory();
+    return;
+  }
+
   static const std::string cmdTemplate = []()
   {
     std::string attachmentOpenCommand = UiConfig::GetStr("attachment_open_command");
@@ -1600,6 +1625,12 @@ void UiModel::Impl::OpenCreateChat(const std::pair<std::string, std::string>& p_
       }
     }
 
+    // a chat hidden by pinned_only_profiles is listed once explicitly opened
+    if (m_ChatSet[profileId].insert(userId).second)
+    {
+      m_ChatVec.push_back(std::make_pair(profileId, userId));
+    }
+
     m_CurrentChatIndex = 0;
     m_CurrentChat.first = profileId;
     m_CurrentChat.second = userId;
@@ -1717,6 +1748,7 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
             m_ChatInfos[profileId][chatInfo.id] = chatInfo;
 
             if (chatInfo.isArchived) continue;
+            if (IsChatListFiltered(profileId, chatInfo.id)) continue;
 
             if (m_ChatSet[profileId].insert(chatInfo.id).second)
             {
@@ -2242,6 +2274,33 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         if (isPinned)
         {
           m_ChatInfos[profileId][chatId].lastMessageTime = lastMessageTime;
+          if (!m_ChatInfos[profileId][chatId].isArchived && !IsChatListFiltered(profileId, chatId) &&
+              m_ChatSet[profileId].insert(chatId).second)
+          {
+            m_ChatVec.push_back(std::make_pair(profileId, chatId));
+          }
+        }
+        else if (IsChatPinFiltered(profileId, chatId) && m_ChatSet[profileId].count(chatId))
+        {
+          m_ChatSet[profileId].erase(chatId);
+          m_ChatVec.erase(
+            std::remove(m_ChatVec.begin(), m_ChatVec.end(), std::make_pair(profileId, chatId)),
+            m_ChatVec.end());
+
+          if ((m_CurrentChat.first == profileId) && (m_CurrentChat.second == chatId))
+          {
+            if (!m_ChatVec.empty())
+            {
+              m_CurrentChat = m_ChatVec.at(NumUtil::Bound(0, m_CurrentChatIndex, ((int)m_ChatVec.size() - 1)));
+            }
+            else
+            {
+              m_CurrentChat = s_ChatNone;
+            }
+            SortChats();
+            OnCurrentChatChanged();
+            SetSelectMessageActive(false);
+          }
         }
         UpdateChatInfoLastMessageTime(profileId, chatId);
         SortChats();
@@ -2284,7 +2343,7 @@ void UiModel::Impl::MessageHandler(std::shared_ptr<ServiceMessage> p_ServiceMess
         }
         else
         {
-          if (m_ChatSet[profileId].insert(chatId).second)
+          if (!IsChatListFiltered(profileId, chatId) && m_ChatSet[profileId].insert(chatId).second)
           {
             m_ChatVec.push_back(std::make_pair(profileId, chatId));
           }
@@ -2433,6 +2492,11 @@ bool UiModel::Impl::Process()
   }
 
   ProcessTimers();
+
+  if (UiAudioPlayer::Poll())
+  {
+    UpdateHistory();
+  }
 
   SetTyping("", "", false);
   m_View->Draw();
@@ -2591,7 +2655,9 @@ void UiModel::Impl::UpdateChatInfoIsUnread(const std::string& p_ProfileId, const
   std::unordered_map<std::string, ChatInfo>& profileChatInfos = m_ChatInfos[p_ProfileId];
   if (profileChatInfos.count(p_ChatId))
   {
-    if (profileChatInfos[p_ChatId].isArchived)
+    if (profileChatInfos[p_ChatId].isArchived ||
+        ((IsChatPinFiltered(p_ProfileId, p_ChatId) || IsChatLocalArchived(p_ProfileId, p_ChatId)) &&
+         !m_ChatSet[p_ProfileId].count(p_ChatId)))
     {
       profileChatInfos[p_ChatId].isUnread = isUnread;
       return;
@@ -3167,6 +3233,7 @@ void UiModel::Impl::SetSelectMessageActive(bool p_SelectMessageActive)
   m_SelectMessageActive = p_SelectMessageActive;
   SetHelpOffset(0);
   UpdateHelp();
+  UpdateStatus(); // send hint shows send / reply / save
 }
 
 bool UiModel::Impl::GetListDialogActive()
@@ -3220,6 +3287,7 @@ void UiModel::Impl::SetEditMessageActive(bool p_EditMessageActive)
 
   SetHelpOffset(0);
   UpdateHelp();
+  UpdateStatus(); // send hint shows send / reply / save
 }
 
 bool UiModel::Impl::GetFindMessageActive()
@@ -4344,6 +4412,214 @@ bool UiModel::Impl::IsChatForceHidden(const std::string& p_ChatId)
   return statusBroadcastHidden && (p_ChatId == "status@broadcast");
 }
 
+bool UiModel::Impl::IsChatPinFiltered(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  // pinned_only_profiles: comma-separated profile ids or protocol names (e.g. "Signal")
+  static const std::vector<std::string> pinnedOnlyProfiles = []()
+  {
+    std::vector<std::string> profiles;
+    for (std::string profile : StrUtil::Split(UiConfig::GetStr("pinned_only_profiles"), ','))
+    {
+      StrUtil::Trim(profile);
+      if (!profile.empty()) profiles.push_back(profile);
+    }
+    return profiles;
+  }();
+  if (!m_PinnedOnlyActive || pinnedOnlyProfiles.empty()) return false;
+
+  const std::string protocolName = p_ProfileId.substr(0, p_ProfileId.find('_'));
+  bool isPinnedOnly = false;
+  for (const auto& profile : pinnedOnlyProfiles)
+  {
+    if ((profile == p_ProfileId) || (profile == protocolName))
+    {
+      isPinnedOnly = true;
+      break;
+    }
+  }
+  if (!isPinnedOnly) return false;
+
+  auto it = m_ChatInfos[p_ProfileId].find(p_ChatId);
+  return (it == m_ChatInfos[p_ProfileId].end()) || !it->second.isPinned;
+}
+
+static const std::string s_ArchivedView = "Archived";
+
+bool UiModel::Impl::IsChatLocalArchived(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  return m_LocalArchived.count(std::make_pair(p_ProfileId, p_ChatId)) > 0;
+}
+
+void UiModel::Impl::LoadLocalArchive()
+{
+  // one "profileId chatId" per line
+  static const std::string path = FileUtil::GetApplicationDir() + "/local_archive.txt";
+  if (!FileUtil::Exists(path)) return;
+
+  for (const auto& line : StrUtil::Split(FileUtil::ReadFile(path), '\n'))
+  {
+    const size_t sep = line.find(' ');
+    if (sep == std::string::npos) continue;
+
+    m_LocalArchived.insert(std::make_pair(line.substr(0, sep), line.substr(sep + 1)));
+  }
+}
+
+void UiModel::Impl::SaveLocalArchive()
+{
+  static const std::string path = FileUtil::GetApplicationDir() + "/local_archive.txt";
+  std::string data;
+  for (const auto& chat : m_LocalArchived)
+  {
+    data += chat.first + " " + chat.second + "\n";
+  }
+
+  FileUtil::WriteFile(path, data);
+}
+
+bool UiModel::Impl::IsChatListFiltered(const std::string& p_ProfileId, const std::string& p_ChatId)
+{
+  const bool isLocalArchived = IsChatLocalArchived(p_ProfileId, p_ChatId);
+  if (m_ListViewProtocol == s_ArchivedView) return !isLocalArchived;
+
+  if (isLocalArchived) return true;
+
+  if (!m_ListViewProtocol.empty() && (p_ProfileId.substr(0, p_ProfileId.find('_')) != m_ListViewProtocol))
+  {
+    return true;
+  }
+
+  return IsChatPinFiltered(p_ProfileId, p_ChatId);
+}
+
+void UiModel::Impl::RebuildChatList()
+{
+  m_ChatSet.clear();
+  m_ChatVec.clear();
+  for (const auto& profileChatInfos : m_ChatInfos)
+  {
+    const std::string& profileId = profileChatInfos.first;
+    for (const auto& chatInfo : profileChatInfos.second)
+    {
+      const std::string& chatId = chatInfo.first;
+      if (chatInfo.second.isArchived || IsChatForceHidden(chatId) || IsChatListFiltered(profileId, chatId)) continue;
+
+      m_ChatSet[profileId].insert(chatId);
+      m_ChatVec.push_back(std::make_pair(profileId, chatId));
+    }
+  }
+
+  if (!m_ChatSet[m_CurrentChat.first].count(m_CurrentChat.second))
+  {
+    m_CurrentChatIndex = -1;
+    m_CurrentChat = s_ChatNone;
+  }
+
+  SortChats();
+  OnCurrentChatChanged();
+  SetSelectMessageActive(false);
+  UpdateList();
+  UpdateStatus();
+}
+
+void UiModel::Impl::OnKeyPlayAudio()
+{
+  // play/stop the selected voice note, or the newest one in the current chat
+  AnyUserKeyInput();
+
+  const std::string profileId = m_CurrentChat.first;
+  const std::string chatId = m_CurrentChat.second;
+  const bool isSelectActive = GetSelectMessageActive();
+  if (!isSelectActive && UiAudioPlayer::IsPlaying())
+  {
+    UiAudioPlayer::Stop();
+    UpdateHistory();
+    return;
+  }
+
+  const std::vector<std::string>& messageVec = m_MessageVec[profileId][chatId];
+  const std::unordered_map<std::string, ChatMessage>& messages = m_Messages[profileId][chatId];
+  const size_t start = isSelectActive ? (size_t)m_MessageOffset[profileId][chatId] : 0;
+  for (size_t i = start; i < messageVec.size(); ++i)
+  {
+    auto mit = messages.find(messageVec.at(i));
+    const bool hasFile = (mit != messages.end()) && !mit->second.fileInfo.empty();
+    FileInfo fileInfo = hasFile ? ProtocolUtil::FileInfoFromHex(mit->second.fileInfo) : FileInfo();
+    const bool isAudio = hasFile && (UiAudioPlayer::IsAudio(fileInfo.filePath) ||
+                                     StrUtil::StartsWith(fileInfo.fileType, "audio"));
+    if (!isAudio)
+    {
+      if (isSelectActive) return; // selected message is not a voice note
+
+      continue;
+    }
+
+    if (UiModel::Impl::IsAttachmentDownloaded(fileInfo))
+    {
+      UiAudioPlayer::Toggle(fileInfo.filePath);
+    }
+    else if (UiModel::Impl::IsAttachmentDownloadable(fileInfo, true /*p_AllowRetryFailed*/))
+    {
+      // plays via OpenAttachment once downloaded
+      DownloadAttachment(profileId, chatId, mit->first, fileInfo.fileId, DownloadFileActionOpen);
+    }
+
+    UpdateHistory();
+    return;
+  }
+}
+
+void UiModel::Impl::OnKeyCycleListView()
+{
+  // cycle: all -> each protocol (sorted) -> all
+  std::set<std::string> protocolNames;
+  for (const auto& protocol : m_Protocols)
+  {
+    protocolNames.insert(protocol.first.substr(0, protocol.first.find('_')));
+  }
+
+  // cycle: all -> each protocol (if several) -> archived (if any locally archived) -> all
+  std::vector<std::string> views = { "" };
+  if (protocolNames.size() > 1)
+  {
+    views.insert(views.end(), protocolNames.begin(), protocolNames.end());
+  }
+
+  if (!m_LocalArchived.empty() || (m_ListViewProtocol == s_ArchivedView))
+  {
+    views.push_back(s_ArchivedView);
+  }
+
+  if (views.size() < 2) return;
+
+  auto it = std::find(views.begin(), views.end(), m_ListViewProtocol);
+  m_ListViewProtocol = ((it == views.end()) || (std::next(it) == views.end())) ? views.front() : *std::next(it);
+  RebuildChatList();
+}
+
+void UiModel::Impl::OnKeyTogglePinnedOnly()
+{
+  m_PinnedOnlyActive = !m_PinnedOnlyActive;
+  RebuildChatList();
+}
+
+std::string UiModel::Impl::GetListViewLabel()
+{
+  static const bool hasPinnedOnlyProfiles = !UiConfig::GetStr("pinned_only_profiles").empty();
+  std::string label;
+  if (!m_ListViewProtocol.empty())
+  {
+    label = (m_ListViewProtocol == "WhatsAppMd") ? "WhatsApp" : m_ListViewProtocol;
+  }
+
+  if (hasPinnedOnlyProfiles && !m_PinnedOnlyActive)
+  {
+    label += label.empty() ? "all chats" : " +all";
+  }
+
+  return label.empty() ? label : ("[" + label + "]");
+}
+
 bool UiModel::Impl::IsChatForceMuted(const std::string& p_ChatId)
 {
   static const bool statusBroadcastMuted = (UiConfig::GetNum("status_broadcast") == 1);
@@ -4583,6 +4859,9 @@ void UiModel::KeyHandler(wint_t p_Key)
   static wint_t keyDeleteChat = UiKeyConfig::GetKey("delete_chat");
   static wint_t keyArchiveChat = UiKeyConfig::GetKey("archive_chat");
   static wint_t keyPin = UiKeyConfig::GetKey("pin");
+  static wint_t keyCycleListView = UiKeyConfig::GetKey("cycle_list_view");
+  static wint_t keyTogglePinnedOnly = UiKeyConfig::GetKey("toggle_pinned_only");
+  static wint_t keyPlayAudio = UiKeyConfig::GetKey("play_audio");
   static wint_t keyEditMsg = UiKeyConfig::GetKey("edit_msg");
   static wint_t keyCancel = UiKeyConfig::GetKey("cancel");
 
@@ -4738,6 +5017,24 @@ void UiModel::KeyHandler(wint_t p_Key)
   {
     OnKeyPin();
   }
+  else if (p_Key == keyCycleListView)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetSelectMessageActive() || GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyCycleListView();
+  }
+  else if (p_Key == keyPlayAudio)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyPlayAudio();
+  }
+  else if (p_Key == keyTogglePinnedOnly)
+  {
+    std::unique_lock<owned_mutex> lock(m_ModelMutex);
+    if (GetImpl().GetSelectMessageActive() || GetImpl().GetEditMessageActive()) return;
+    GetImpl().OnKeyTogglePinnedOnly();
+  }
   else if (p_Key == keyOpen)
   {
     std::unique_lock<owned_mutex> lock(m_ModelMutex);
@@ -4775,7 +5072,22 @@ void UiModel::KeyHandler(wint_t p_Key)
   }
   else if (p_Key == keyCopy)
   {
-    OnKeyCopy();
+    // copy and cancel may share a key: cancel takes precedence while editing a message
+    bool isCancelEdit = false;
+    if (keyCopy == keyCancel)
+    {
+      std::unique_lock<owned_mutex> lock(m_ModelMutex);
+      isCancelEdit = GetImpl().GetEditMessageActive();
+      if (isCancelEdit)
+      {
+        GetImpl().OnKeyCancel();
+      }
+    }
+
+    if (!isCancelEdit)
+    {
+      OnKeyCopy();
+    }
   }
   else if (p_Key == keyPaste)
   {
@@ -5028,6 +5340,12 @@ std::string UiModel::GetChatStatusLocked(const std::string& p_ProfileId, const s
 {
   nc_assert(m_ModelMutex.owns_lock());
   return GetImpl().GetChatStatus(p_ProfileId, p_ChatId);
+}
+
+std::string UiModel::GetListViewLabelLocked()
+{
+  nc_assert(m_ModelMutex.owns_lock());
+  return GetImpl().GetListViewLabel();
 }
 
 std::vector<std::pair<std::string, std::string>>& UiModel::GetChatVecLocked()
@@ -5572,7 +5890,8 @@ void UiModel::OnKeyArchiveChat()
     if (GetImpl().GetSelectMessageActive() || GetImpl().GetEditMessageActive()) return;
 
     const std::string& profileId = GetImpl().GetCurrentChat().first;
-    hasFeature = GetImpl().HasProtocolFeature(profileId, FeatureArchiveChat);
+    static const bool archiveLocal = UiConfig::GetBool("archive_local");
+    hasFeature = archiveLocal || GetImpl().HasProtocolFeature(profileId, FeatureArchiveChat);
   }
 
   if (!hasFeature)

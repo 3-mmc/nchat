@@ -64,6 +64,10 @@ private:
     void OnKeyDeleteChat();
     void OnKeyArchiveChat();
     void OnKeyPinChat();
+    void OnKeyCycleListView();
+    void OnKeyPlayAudio();
+    void OnKeyTogglePinnedOnly();
+    std::string GetListViewLabel();
     void OnKeyOpenMsg();
     bool GetMessageAttachmentPath(std::string& p_FilePath, DownloadFileAction p_DownloadFileAction);
     void OnKeyOpenAttachment(std::string p_FilePath = std::string());
@@ -232,6 +236,12 @@ private:
     void PerformFindNext(const std::string& p_FindText);
     bool IsChatForceHidden(const std::string& p_ChatId);
     bool IsChatForceMuted(const std::string& p_ChatId);
+    bool IsChatPinFiltered(const std::string& p_ProfileId, const std::string& p_ChatId);
+    bool IsChatListFiltered(const std::string& p_ProfileId, const std::string& p_ChatId);
+    void RebuildChatList();
+    bool IsChatLocalArchived(const std::string& p_ProfileId, const std::string& p_ChatId);
+    void LoadLocalArchive();
+    void SaveLocalArchive();
     void AddQuoteFromSelectedMessage(ChatMessage& p_ChatMessage);
 
   private:
@@ -244,6 +254,9 @@ private:
 
     std::unordered_map<std::string, std::unordered_set<std::string>> m_ChatSet;
     std::vector<std::pair<std::string, std::string>> m_ChatVec;
+    std::string m_ListViewProtocol; // empty = all protocols
+    bool m_PinnedOnlyActive = true;
+    std::set<std::pair<std::string, std::string>> m_LocalArchived; // archive_local=1
     std::unordered_map<std::string, std::unordered_map<std::string, ChatInfo>> m_ChatInfos;
     std::unordered_map<std::string, std::unordered_map<std::string, ContactInfo>> m_ContactInfos;
     int64_t m_ContactInfosUpdateTime = 0;
@@ -345,6 +358,7 @@ public:
   // Locked methods require caller to hold model mutex (intended for Ui*View classes)
   bool GetChatIsUnreadLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
   std::string GetChatStatusLocked(const std::string& p_ProfileId, const std::string& p_ChatId);
+  std::string GetListViewLabelLocked();
   std::vector<std::pair<std::string, std::string>>& GetChatVecLocked();
   std::string GetContactListNameLocked(const std::string& p_ProfileId, const std::string& p_ChatId, bool p_AllowId,
                                        bool p_AllowAlias);

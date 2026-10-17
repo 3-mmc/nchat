@@ -241,6 +241,9 @@ void UiKeyConfig::Init(bool p_MapKeys)
     { "delete_chat", "\\33\\144" }, // alt/opt-d
     { "archive_chat", "\\33\\141" }, // alt/opt-a
     { "pin", "\\33\\160" }, // alt/opt-p
+    { "cycle_list_view", "\\33\\146" }, // alt/opt-f
+    { "toggle_pinned_only", "\\33\\157" }, // alt/opt-o
+    { "play_audio", "KEY_NONE" },
     { "open", "KEY_CTRLV" },
     { "open_link", "KEY_CTRLW" },
     { "open_msg", "\\33\\167" }, // alt/opt-w

@@ -70,11 +70,26 @@ void UiListView::Draw()
 
   werase(m_PaddedWin);
   wbkgd(m_PaddedWin, attribute | colorPair | ' ');
+
+  // header showing the active list view filter (Alt-f / Alt-o), list starts below it
+  int top = 0;
+  std::string viewLabel = m_Model->GetListViewLabelLocked();
+  if (!viewLabel.empty() && (m_PaddedH > 1))
+  {
+    viewLabel = viewLabel.substr(1, viewLabel.size() - 2); // strip brackets
+    std::wstring wheader = StrUtil::ToWString("\xe2\x96\xb8 " + viewLabel); // ▸
+    wheader = StrUtil::TrimPadWString(wheader, m_PaddedW);
+    wattron(m_PaddedWin, A_REVERSE | A_BOLD | colorPair);
+    mvwaddnwstr(m_PaddedWin, 0, 0, wheader.c_str(), wheader.size());
+    wattroff(m_PaddedWin, A_REVERSE | A_BOLD | colorPair);
+    top = 1;
+  }
+
   wattron(m_PaddedWin, attribute | colorPair);
 
   if (!names.empty())
   {
-    int height = m_PaddedH;
+    int height = m_PaddedH - top;
     int count = names.size();
     int offset = std::min(std::max(0, index - ((height - 1) / 2)), std::max(0, count - height));
     int last = std::min((height + offset), count);
@@ -86,7 +101,7 @@ void UiListView::Draw()
         wattron(m_PaddedWin, attributeSelected);
       }
 
-      int y = i - offset;
+      int y = i - offset + top;
       std::string name = names[i];
       if (!emojiEnabled)
       {

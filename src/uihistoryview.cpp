@@ -15,7 +15,9 @@
 #include "strutil.h"
 #include "timeutil.h"
 #include "uicolorconfig.h"
+#include "uiaudioplayer.h"
 #include "uiconfig.h"
+#include "uiimagepreview.h"
 #include "uimodel.h"
 
 UiHistoryView::UiHistoryView(const UiViewParams& p_Params)
@@ -71,6 +73,7 @@ void UiHistoryView::Draw()
   static std::wstring attachmentIndicator =
     StrUtil::ToWString(UiConfig::GetStr("attachment_indicator") + " ");
   static std::wstring quoteIndicator = L"> ";
+  static std::wstring imageRowIndicator = L"\uF8FF"; // placeholder line for an inline image row
 
   std::pair<std::string, std::string>& currentChat = m_Model->GetCurrentChatLocked();
   const bool emojiEnabled = m_Model->GetEmojiEnabledLocked();
@@ -121,6 +124,7 @@ void UiHistoryView::Draw()
       return colorPairGroup;
     }();
 
+    const UiImageRows* imageRows = nullptr;
     std::vector<std::wstring> wlines;
     if (!msg.text.empty())
     {
@@ -207,7 +211,7 @@ void UiHistoryView::Draw()
       else if (fileInfo.fileStatus == FileStatusDownloaded)
       {
         static const std::string statusDownloaded = "";
-        fileStatus = statusDownloaded;
+        fileStatus = statusDownloaded + UiAudioPlayer::GetStatus(fileInfo.filePath);
       }
       else if (fileInfo.fileStatus == FileStatusDownloading)
       {
@@ -221,6 +225,18 @@ void UiHistoryView::Draw()
       }
 
       std::wstring fileStr = attachmentIndicator + StrUtil::ToWString(fileName + fileStatus);
+
+      // Inline image preview
+      if (UiImagePreview::IsEnabled() && (fileInfo.fileStatus == FileStatusDownloaded) &&
+          UiImagePreview::IsPreviewable(fileInfo.filePath))
+      {
+        imageRows = &UiImagePreview::GetRows(fileInfo.filePath, m_PaddedW);
+        for (size_t row = imageRows->size(); row > 0; --row)
+        {
+          wlines.insert(wlines.begin(), imageRowIndicator + std::to_wstring(row - 1));
+        }
+      }
+
       wlines.insert(wlines.begin(), fileStr);
     }
 
@@ -316,6 +332,19 @@ void UiHistoryView::Draw()
 
     for (auto wline = wlines.rbegin(); wline != wlines.rend(); ++wline)
     {
+      if ((imageRows != nullptr) && (wline->rfind(imageRowIndicator, 0) == 0))
+      {
+        const size_t row = std::stoul(wline->substr(imageRowIndicator.size()));
+        if (row < imageRows->size())
+        {
+          UiImagePreview::DrawRow(m_PaddedWin, y, imageRows->at(row), m_PaddedW);
+        }
+
+        if (--y < 0) break;
+
+        continue;
+      }
+
       bool isAttachment = (wline->rfind(attachmentIndicator, 0) == 0);
       bool isQuote = (wline->rfind(quoteIndicator, 0) == 0);
       bool isReaction = (reactionLines == 1) && (std::distance(wline, wlines.rbegin()) == 0);

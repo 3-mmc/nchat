@@ -223,6 +223,10 @@ message(STATUS "WhatsApp: ${HAS_WHATSAPP}")
 option(HAS_SIGNAL "Signal" OFF)
 message(STATUS "Signal: ${HAS_SIGNAL}")
 
+# Optional component - Instagram (local addition, mautrix-meta based)
+option(HAS_INSTAGRAM "Instagram" OFF)
+message(STATUS "Instagram: ${HAS_INSTAGRAM}")
+
 # musl restrictions - Go c-archives built with a stock Go toolchain segfault
 # at startup on musl (nchat issue #204 / Go PR #69325), so on musl WhatsApp and
 # Signal (both Go/cgo) require a patched Go toolchain, asserted via
@@ -282,7 +286,7 @@ message(STATUS "Combined Go library: ${HAS_COMBINED_GOLIB}")
 # Check Golang version for whatsmeow minimum requirement
 set(GO_VERSION_MIN 1.23)
 execute_process(COMMAND bash "-c" "go version 2> /dev/null | cut -c14- | cut -d' ' -f1 | tr -d '\n'" OUTPUT_VARIABLE GO_VERSION)
-if((HAS_WHATSAPP OR HAS_SIGNAL) AND (NOT GO_VERSION VERSION_GREATER_EQUAL GO_VERSION_MIN))
+if((HAS_WHATSAPP OR HAS_SIGNAL OR HAS_INSTAGRAM) AND (NOT GO_VERSION VERSION_GREATER_EQUAL GO_VERSION_MIN))
   message(FATAL_ERROR "Go version ${GO_VERSION} (need >= ${GO_VERSION_MIN} to build WhatsApp or Signal)")
 endif()
 
@@ -427,7 +431,11 @@ add_executable(nchat
   src/uihelpview.cpp
   src/uihelpview.h
   src/uihistoryview.cpp
+  src/uiaudioplayer.cpp
+  src/uiimagepreview.cpp
   src/uihistoryview.h
+  src/uiaudioplayer.h
+  src/uiimagepreview.h
   src/uikeyconfig.cpp
   src/uikeyconfig.h
   src/uikeydump.cpp
@@ -491,6 +499,9 @@ endif()
 if(HAS_SIGNAL)
   add_subdirectory(lib/sgchat)
 endif()
+if(HAS_INSTAGRAM)
+  add_subdirectory(lib/igchat)
+endif()
 
 # Dependency ncurses
 if (${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
@@ -543,6 +554,14 @@ if(HAS_SIGNAL)
   target_compile_definitions(nchat PRIVATE HAS_SIGNAL="${HAS_SIGNAL}")
   if(NOT HAS_DYNAMICLOAD)
     target_link_libraries(nchat PUBLIC sgchat)
+  endif()
+endif()
+
+if(HAS_INSTAGRAM)
+  target_include_directories(nchat PRIVATE "lib/igchat/src")
+  target_compile_definitions(nchat PRIVATE HAS_INSTAGRAM="${HAS_INSTAGRAM}")
+  if(NOT HAS_DYNAMICLOAD)
+    target_link_libraries(nchat PUBLIC igchat)
   endif()
 endif()
 

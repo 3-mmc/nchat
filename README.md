@@ -1,6 +1,17 @@
 nchat
 =====
 
+> **This is a personal fork of [d99kris/nchat](https://github.com/d99kris/nchat).**
+> It adds Instagram DMs (via [mautrix-meta](https://github.com/mautrix/meta)'s
+> instameow, build with `-DHAS_INSTAGRAM=ON`), inline image / video thumbnail
+> previews (chafa), inline voice note playback (ffplay), protocol views,
+> Signal pinned-only mode, local archive and a reworked help bar.
+> See [doc/FORK.md](doc/FORK.md) for details.
+>
+> **Licence note:** mautrix-meta is AGPL-3.0. nchat itself stays MIT, but a
+> build with `HAS_INSTAGRAM=ON` links AGPL code and is distributed under the
+> AGPL-3.0 as a whole.
+
 | **Linux** | **Mac** |
 |-----------|---------|
 | [![Linux](https://github.com/d99kris/nchat/workflows/Linux/badge.svg)](https://github.com/d99kris/nchat/actions?query=workflow%3ALinux) | [![macOS](https://github.com/d99kris/nchat/workflows/macOS/badge.svg)](https://github.com/d99kris/nchat/actions?query=workflow%3AmacOS) |

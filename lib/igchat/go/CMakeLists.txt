@@ -1,0 +1,71 @@
+# Project
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+project(libcgoig)
+
+# Check Golang version
+execute_process(COMMAND bash "-c" "go version | cut -c14- | cut -d' ' -f1 | tr -d '\n'" OUTPUT_VARIABLE GO_VERSION)
+message(STATUS "Go version ${GO_VERSION}.")
+set(CUSTOM_GO_FLAGS -modcacherw -buildvcs=false)
+
+# Detached debug symbols: when the dist/release build splits nchat's own DWARF
+# into a detached nchat.debug / .dSYM (HAS_DEBUG_SYMBOLS, top-level CMakeLists),
+# omit this c-archive's Go DWARF with -ldflags=-w. A c-archive linked into
+# nchat would otherwise fold whatsmeow's Go DWARF into the detached symbols,
+# dwarfing nchat's own frames. -w drops the DWARF only (the archive's symbol
+# table, needed by the final link, stays), so codegen and linking are unaffected.
+if(HAS_DEBUG_SYMBOLS)
+  list(APPEND CUSTOM_GO_FLAGS -ldflags=-w)
+endif()
+
+# Check Go package
+execute_process(COMMAND bash "-c" "go version | grep -v -q gccgo" RESULT_VARIABLE GO_GCC)
+if (GO_GCC EQUAL "1")
+  message(STATUS "Go gccgo.")
+  set(GO_LIBRARIES "go" PARENT_SCOPE)
+else ()
+  message(STATUS "Go golang.")
+  set(GO_LIBRARIES "" PARENT_SCOPE)
+endif ()
+
+# Config params
+if (HAS_STATICGOLIB)
+  set(BUILDMODE c-archive)
+  set(OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR})
+  set(LIBSUFFIX ${CMAKE_STATIC_LIBRARY_SUFFIX})
+else()
+  set(BUILDMODE c-shared)
+  set(OUTPUT_DIR ${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
+  set(LIBSUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
+endif()
+
+# Build Go library / C archive
+set(TARGET cgoig)
+set(GOPATH ${OUTPUT_DIR})
+set(SRCS goig.go cgoig.go go.mod go.sum)
+set(LIB "libcgoig${LIBSUFFIX}")
+add_custom_command(OUTPUT ${OUTPUT_DIR}/${LIB}
+  DEPENDS ${SRCS}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  COMMAND env GOPATH=${GOPATH} CGO_ENABLED=1 go build -buildmode=${BUILDMODE} ${CUSTOM_GO_FLAGS}
+  -o "${OUTPUT_DIR}/${LIB}"
+  ${CMAKE_GO_FLAGS} ./...
+  COMMENT "Building Go library")
+add_custom_target(${TARGET} DEPENDS ${OUTPUT_DIR}/${LIB} ${HEADER})
+
+# Reference Go library (c-archive is a static library, link it by path)
+if (HAS_STATICGOLIB)
+  add_library(ref-cgoig STATIC IMPORTED GLOBAL)
+else()
+  add_library(ref-cgoig SHARED IMPORTED GLOBAL)
+endif()
+add_dependencies(ref-cgoig ${TARGET})
+set_target_properties(ref-cgoig
+  PROPERTIES
+  IMPORTED_NO_SONAME TRUE
+  IMPORTED_LOCATION ${OUTPUT_DIR}/${LIB}
+  INTERFACE_INCLUDE_DIRECTORIES ${OUTPUT_DIR})
+
+# Install
+if (NOT HAS_STATICGOLIB)
+  install(FILES ${OUTPUT_DIR}/${LIB} DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()

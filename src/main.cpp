@@ -47,6 +47,10 @@
 #include "sgchat.h"
 #endif
 
+#ifdef HAS_INSTAGRAM
+#include "igchat.h"
+#endif
+
 static std::string GetFeatures();
 static void RemoveProfile();
 static std::shared_ptr<Protocol> SetupProfile();
@@ -132,6 +136,9 @@ static std::vector<std::shared_ptr<ProtocolBaseFactory>> GetProtocolFactorys()
 #endif
 #ifdef HAS_SIGNAL
     std::shared_ptr<ProtocolBaseFactory>(new ProtocolFactory<SgChat>()),
+#endif
+#ifdef HAS_INSTAGRAM
+    std::shared_ptr<ProtocolBaseFactory>(new ProtocolFactory<IgChat>()),
 #endif
   };
 
@@ -511,6 +518,10 @@ std::string GetFeatures()
 
 #if defined(HAS_SIGNAL)
   features.push_back("signal");
+#endif
+
+#if defined(HAS_INSTAGRAM)
+  features.push_back("instagram");
 #endif
 
   return StrUtil::Join(features, ", ");

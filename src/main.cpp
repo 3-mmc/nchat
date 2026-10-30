@@ -5,6 +5,7 @@
 //
 // nchat is distributed under the MIT license, see LICENSE for details.
 
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -27,6 +28,7 @@
 #include "profiles.h"
 #include "scopeddirlock.h"
 #include "status.h"
+#include "serve.h"
 #include "strutil.h"
 #include "sysutil.h"
 #include "ui.h"
@@ -159,12 +161,31 @@ int main(int argc, char* argv[])
   bool isRemove = false;
   bool isSetup = false;
   std::vector<std::string> args(argv + 1, argv + argc);
+  const bool isServe = std::find(args.begin(), args.end(), "--serve") != args.end();
+  if (isServe)
+  {
+    for (size_t i = 0; i < args.size(); ++i)
+    {
+      if ((args[i] == "-d") || (args[i] == "--confdir"))
+      {
+        if (++i < args.size()) continue;
+      }
+      else if ((args[i] == "--serve") || (args[i] == "-e") || (args[i] == "--verbose") ||
+               (args[i] == "-ee") || (args[i] == "--extra-verbose")) continue;
+      std::cerr << "error: --serve accepts only --confdir and logging options\n";
+      return 1;
+    }
+  }
   for (auto it = args.begin(); it != args.end(); ++it)
   {
     if (((*it == "-d") || (*it == "--confdir")) && (std::distance(it + 1, args.end()) > 0))
     {
       ++it;
       FileUtil::SetApplicationDir(*it);
+    }
+    else if (*it == "--serve")
+    {
+      // Handled after core initialization, before constructing the UI.
     }
     else if ((*it == "-e") || (*it == "--verbose"))
     {
@@ -227,6 +248,21 @@ int main(int argc, char* argv[])
   }
 
   ScopedDirLock dirLock(FileUtil::GetApplicationDir());
+  if (!dirLock.IsLocked() && isServe)
+  {
+    // Another frontend owns this confdir. Report its profile locks without
+    // rotating its log or writing its shared configuration/cache files.
+    Serve server;
+    const std::string profilesDir = FileUtil::GetApplicationDir() + "/profiles";
+    for (const auto& profile : FileUtil::ListDirNames(profilesDir))
+    {
+      if (profile == "version") continue;
+      ScopedDirLock profileLock(profilesDir + "/" + profile);
+      server.AddSkipped(profile, profileLock.IsLocked() ? "config directory locked" : "locked");
+    }
+    server.Run();
+    return 0;
+  }
   if (!dirLock.IsLocked())
   {
     std::cerr <<
@@ -331,6 +367,62 @@ int main(int argc, char* argv[])
 
   // Init temp
   FileUtil::InitTempDir();
+
+  if (isServe)
+  {
+    // Keep the terminal frontend's startup unchanged. Serve loads profiles with
+    // the same factories and per-profile locks, but never constructs a Ui.
+    try
+    {
+      Serve server;
+      std::vector<std::unique_ptr<ScopedDirLock>> locks;
+      const std::string profilesDir = FileUtil::GetApplicationDir() + "/profiles";
+      size_t loaded = 0;
+      for (const auto& profile : FileUtil::ListDirNames(profilesDir))
+      {
+        if (profile == "version") continue;
+        size_t separator = profile.find('_');
+        if (separator == std::string::npos) { server.AddSkipped(profile, "invalid name"); continue; }
+#ifndef HAS_MULTIPROTOCOL
+        if (loaded != 0) { server.AddSkipped(profile, "multiple profiles disabled"); continue; }
+#endif
+        auto lock = std::make_unique<ScopedDirLock>(profilesDir + "/" + profile);
+        if (!lock->IsLocked()) { server.AddSkipped(profile, "locked"); continue; }
+        bool found = false;
+        const std::string name = profile.substr(0, separator);
+        for (const auto& factory : GetProtocolFactorys())
+        {
+          if (factory->GetName() != name) continue;
+          auto protocol = factory->Create();
+          if (protocol && protocol->LoadProfile(profilesDir, profile))
+          {
+            server.AddProtocol(name, protocol);
+            locks.push_back(std::move(lock));
+            ++loaded;
+            found = true;
+          }
+          else if (protocol) protocol->CloseProfile();
+          break;
+        }
+        if (!found) server.AddSkipped(profile, "unsupported or load failed");
+      }
+      server.Run();
+    }
+    catch (const std::exception& error)
+    {
+      LOG_ERROR("serve startup failed: %s", error.what());
+      std::cerr << "error: " << error.what() << "\n";
+      return 1;
+    }
+    DebugInfo::SetStr("version_used", AppUtil::GetAppVersion());
+    FileUtil::CleanupTempDir();
+    DebugInfo::Cleanup();
+    AppConfig::Cleanup();
+    Profiles::Cleanup();
+    LOG_INFO("serve exit");
+    Log::Cleanup(false);
+    return 0;
+  }
 
   // Init ui
   std::shared_ptr<Ui> ui = std::make_shared<Ui>();
@@ -667,6 +759,7 @@ void ShowHelp()
     "    -k, --keydump          key code dump mode\n"
     "    -m, --devmode          developer mode\n"
     "    -r, --remove           remove chat protocol account\n"
+    "        --serve            run headless JSON lines server (see doc/serve.md)\n"
     "    -s, --setup            set up chat protocol account\n"
     "    -v, --version          output version information and exit\n"
     "    -x, --export <DIR>     export message cache to specified dir\n"

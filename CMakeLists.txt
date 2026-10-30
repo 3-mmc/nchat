@@ -406,6 +406,8 @@ add_custom_command(
 add_executable(nchat
   ${COMPOSE_SCRIPT_HEADER}
   src/main.cpp
+  src/serve.cpp
+  src/serve.h
   src/ui.cpp
   src/ui.h
   src/uichatlistdialog.cpp
@@ -477,7 +479,7 @@ add_executable(nchat
 install(TARGETS nchat DESTINATION bin)
 
 # Headers
-target_include_directories(nchat PRIVATE "lib/common/src")
+target_include_directories(nchat PRIVATE "lib/common/src" "lib/ncutil/ext/cereal/include")
 target_include_directories(nchat PRIVATE "lib/ncutil/src")
 target_include_directories(nchat PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 
@@ -699,12 +701,14 @@ if(CMAKE_BUILD_TYPE MATCHES "Debug")
   message(STATUS "Building dev application")
   add_executable(devnchat
     src/main.cpp
+    src/serve.cpp
+    src/serve.h
     dev/ui.cpp
     dev/ui.h
   )
 
   # Headers
-  target_include_directories(devnchat PRIVATE "lib/common/src")
+  target_include_directories(devnchat PRIVATE "lib/common/src" "lib/ncutil/ext/cereal/include")
   target_include_directories(devnchat PRIVATE "lib/ncutil/src")
 
   # Compiler flags

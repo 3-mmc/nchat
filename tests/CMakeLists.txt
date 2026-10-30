@@ -65,3 +65,25 @@ if(CMAKE_GENERATOR STREQUAL "Unix Makefiles")
     endif()
   endif()
 endif()
+
+# Stdio integration against real Dummy profiles, no accounts or terminal needed.
+if(HAS_DUMMY)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME test_serve COMMAND ${Python3_EXECUTABLE}
+             ${CMAKE_CURRENT_SOURCE_DIR}/run_serve_regression.py $<TARGET_FILE:nchat>)
+    set_tests_properties(test_serve PROPERTIES TIMEOUT 60)
+  endif()
+endif()
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_executable(serve_fixture serve_fixture.cpp ../src/serve.cpp)
+  target_include_directories(serve_fixture PRIVATE ../src ../lib/common/src ../lib/ncutil/src
+                             ../lib/ncutil/ext/cereal/include)
+  target_link_libraries(serve_fixture PRIVATE ncutil pthread)
+  target_common_config(serve_fixture)
+  add_test(NAME test_serve_events COMMAND ${Python3_EXECUTABLE}
+           ${CMAKE_CURRENT_SOURCE_DIR}/run_serve_events.py $<TARGET_FILE:serve_fixture>)
+  set_tests_properties(test_serve_events PROPERTIES TIMEOUT 60)
+endif()

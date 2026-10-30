@@ -1,6 +1,8 @@
 nchat
 =====
 
+For a headless JSON lines interface, use `nchat --serve` (see [stdio protocol](doc/serve.md)).
+
 > **This is a personal fork of [d99kris/nchat](https://github.com/d99kris/nchat).**
 > It adds Instagram DMs (via [mautrix-meta](https://github.com/mautrix/meta)'s
 > instameow, build with `-DHAS_INSTAGRAM=ON`), inline image / video thumbnail

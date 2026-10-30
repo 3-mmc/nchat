@@ -719,12 +719,12 @@ std::string WmChat::GetProxyUrl() const
   return "";
 }
 
-void WmChat::SetProtocolUiControl(bool p_IsTakeControl)
+bool WmChat::SetProtocolUiControl(bool p_IsTakeControl)
 {
   if (m_IsSetup)
   {
     LOG_TRACE("set protocol ui control %d ignored during setup", p_IsTakeControl);
-    return;
+    return true;
   }
 
   LOG_TRACE("set protocol ui control %d", p_IsTakeControl);
@@ -733,6 +733,8 @@ void WmChat::SetProtocolUiControl(bool p_IsTakeControl)
   protocolUiControlNotify->isTakeControl = p_IsTakeControl;
   CallMessageHandler(protocolUiControlNotify);
 
+  if (!protocolUiControlNotify->isUiAvailable) return false;
+
   // if attempting to take control, but failed to do so, keep retrying
   while (p_IsTakeControl && !protocolUiControlNotify->isTakeControl)
   {
@@ -740,9 +742,11 @@ void WmChat::SetProtocolUiControl(bool p_IsTakeControl)
     LOG_TRACE("set protocol ui control retry");
     protocolUiControlNotify->isTakeControl = p_IsTakeControl;
     CallMessageHandler(protocolUiControlNotify);
+    if (!protocolUiControlNotify->isUiAvailable) return false;
   }
 
   TimeUtil::Sleep(0.100); // wait more than GetKey timeout
+  return true;
 }
 
 void WmChat::SetStatus(int p_Flags)
@@ -1266,13 +1270,14 @@ void WmReinit(int p_ConnId)
   }
 }
 
-void WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl)
+int WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl)
 {
   WmChat* instance = WmChat::GetInstance(p_ConnId);
   if (instance != nullptr)
   {
-    instance->SetProtocolUiControl(p_IsTakeControl);
+    return instance->SetProtocolUiControl(p_IsTakeControl) ? 1 : 0;
   }
+  return 0;
 }
 
 void WmSetStatus(int p_ConnId, int p_Flags)

@@ -1998,7 +1998,10 @@ func SgLogin(connId int) int {
 		SetState(connId, Connecting)
 
 		LOG_TRACE(fmt.Sprintf("acquire console"))
-		CSgSetProtocolUiControl(connId, 1)
+		if !CSgSetProtocolUiControl(connId, 1) {
+			SetState(connId, Disconnected)
+			return -1
+		}
 
 		fmt.Printf("\n")
 		fmt.Printf("Open Signal on your phone, go to Settings > Linked devices.\n")

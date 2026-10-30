@@ -55,7 +55,7 @@ public:
   void SendRequest(std::shared_ptr<RequestMessage> p_RequestMessage);
   void SetMessageHandler(const std::function<void(std::shared_ptr<ServiceMessage>)>& p_MessageHandler);
 
-  void SetProtocolUiControl(bool p_IsTakeControl);
+  bool SetProtocolUiControl(bool p_IsTakeControl);
   void SetStatus(int p_Flags);
   void ClearStatus(int p_Flags);
 
@@ -127,7 +127,7 @@ void WmUpdateMuteNotify(int p_ConnId, char* p_ChatId, int p_IsMuted);
 void WmUpdateArchivedNotify(int p_ConnId, char* p_ChatId, int p_IsArchived);
 void WmUpdatePinNotify(int p_ConnId, char* p_ChatId, int p_IsPinned, int p_TimePinned);
 void WmReinit(int p_ConnId);
-void WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
+int WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
 void WmSetStatus(int p_ConnId, int p_Flags);
 void WmClearStatus(int p_ConnId, int p_Flags);
 int WmAppConfigGetNum(char* p_Param);

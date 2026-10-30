@@ -25,7 +25,7 @@ package main
 // extern void WmUpdateArchivedNotify(int p_ConnId, char* p_ChatId, int p_IsArchived);
 // extern void WmUpdatePinNotify(int p_ConnId, char* p_ChatId, int p_IsPinned, int p_TimePinned);
 // extern void WmReinit(int p_ConnId);
-// extern void WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
+// extern int WmSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
 // extern void WmSetStatus(int p_ConnId, int p_Flags);
 // extern void WmClearStatus(int p_ConnId, int p_Flags);
 // extern int WmAppConfigGetNum(char* p_Param);
@@ -202,8 +202,8 @@ func CWmReinit(connId int) {
 	C.WmReinit(C.int(connId))
 }
 
-func CWmSetProtocolUiControl(connId int, isTakeControl int) {
-	C.WmSetProtocolUiControl(C.int(connId), C.int(isTakeControl))
+func CWmSetProtocolUiControl(connId int, isTakeControl int) bool {
+	return C.WmSetProtocolUiControl(C.int(connId), C.int(isTakeControl)) != 0
 }
 
 func CWmSetStatus(connId int, flags int) {

@@ -26,7 +26,7 @@ package main
 // extern void SgUpdateArchivedNotify(int p_ConnId, char* p_ChatId, int p_IsArchived);
 // extern void SgUpdatePinNotify(int p_ConnId, char* p_ChatId, int p_IsPinned, int p_TimePinned);
 // extern void SgReinit(int p_ConnId);
-// extern void SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
+// extern int SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
 // extern void SgSetStatus(int p_ConnId, int p_Flags);
 // extern void SgClearStatus(int p_ConnId, int p_Flags);
 // extern int SgAppConfigGetNum(char* p_Param);
@@ -207,8 +207,8 @@ func CSgReinit(connId int) {
 	C.SgReinit(C.int(connId))
 }
 
-func CSgSetProtocolUiControl(connId int, isTakeControl int) {
-	C.SgSetProtocolUiControl(C.int(connId), C.int(isTakeControl))
+func CSgSetProtocolUiControl(connId int, isTakeControl int) bool {
+	return C.SgSetProtocolUiControl(C.int(connId), C.int(isTakeControl)) != 0
 }
 
 func CSgSetStatus(connId int, flags int) {

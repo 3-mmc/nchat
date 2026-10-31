@@ -54,7 +54,7 @@ public:
   void SendRequest(std::shared_ptr<RequestMessage> p_RequestMessage);
   void SetMessageHandler(const std::function<void(std::shared_ptr<ServiceMessage>)>& p_MessageHandler);
 
-  void SetProtocolUiControl(bool p_IsTakeControl);
+  bool SetProtocolUiControl(bool p_IsTakeControl);
   void SetStatus(int p_Flags);
   void ClearStatus(int p_Flags);
 
@@ -134,7 +134,7 @@ void SgUpdateMuteNotify(int p_ConnId, char* p_ChatId, int p_IsMuted);
 void SgUpdateArchivedNotify(int p_ConnId, char* p_ChatId, int p_IsArchived);
 void SgUpdatePinNotify(int p_ConnId, char* p_ChatId, int p_IsPinned, int p_TimePinned);
 void SgReinit(int p_ConnId);
-void SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
+int SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl);
 void SgSetStatus(int p_ConnId, int p_Flags);
 void SgClearStatus(int p_ConnId, int p_Flags);
 int SgAppConfigGetNum(char* p_Param);

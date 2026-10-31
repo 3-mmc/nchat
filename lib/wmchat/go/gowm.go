@@ -2765,7 +2765,10 @@ func WmLogin(connId int) int {
 			usePairingCode := GetConfigOrEnvFlag("USE_PAIRING_CODE")
 
 			LOG_TRACE(fmt.Sprintf("acquire console"))
-			CWmSetProtocolUiControl(connId, 1)
+			if !CWmSetProtocolUiControl(connId, 1) {
+				SetState(connId, Disconnected)
+				return
+			}
 
 			if usePairingCode {
 				fmt.Printf("\n")
@@ -2882,7 +2885,10 @@ func WmLogin(connId int) int {
 		LOG_WARNING(fmt.Sprintf("state not connected %#v", GetState(connId)))
 
 		LOG_TRACE(fmt.Sprintf("acquire console"))
-		CWmSetProtocolUiControl(connId, 1)
+		if !CWmSetProtocolUiControl(connId, 1) {
+			CWmClearStatus(connId, FlagConnecting)
+			return -1
+		}
 
 		fmt.Printf("\n")
 		if GetState(connId) == Outdated {

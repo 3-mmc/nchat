@@ -688,6 +688,7 @@ public:
     : ServiceMessage(p_ProfileId) { }
   virtual MessageType GetMessageType() const { return ProtocolUiControlNotifyType; }
   bool isTakeControl = false;
+  bool isUiAvailable = true; // handler may decline interactive authentication
 };
 
 class RequestAppExitNotify : public ServiceMessage

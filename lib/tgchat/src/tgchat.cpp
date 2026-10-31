@@ -7,6 +7,7 @@
 
 #include "tgchat.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -208,7 +209,7 @@ private:
   td::td_api::object_ptr<td::td_api::formattedText> GetFormattedText(const std::string& p_Text);
   td::td_api::object_ptr<td::td_api::inputMessageText> GetMessageText(const std::string& p_Text);
   std::string ConvertMarkdownV2ToV1(const std::string& p_Str);
-  void SetProtocolUiControl(bool p_IsTakeControl);
+  bool SetProtocolUiControl(bool p_IsTakeControl);
   std::string GetProfilePhoneNumber();
   void GetMsgReactions(td::td_api::object_ptr<td::td_api::messageInteractionInfo>& p_InteractionInfo,
                        Reactions& p_Reactions);
@@ -229,6 +230,7 @@ private:
   td::td_api::object_ptr<td::td_api::AuthorizationState> m_AuthorizationState;
   bool m_IsSetup = false;
   bool m_IsReinit = false;
+  std::atomic<bool> m_AuthUiUnavailable{false};
   bool m_Authorized = false;
   bool m_WasAuthorized = false;
   std::int64_t m_SelfUserId = 0;
@@ -2427,6 +2429,7 @@ std::function<void(TgChat::Impl::Object)> TgChat::Impl::CreateAuthQueryHandler()
 
 void TgChat::Impl::OnAuthStateUpdate()
 {
+  if (m_AuthUiUnavailable) return;
   m_AuthQueryId++;
   // *INDENT-OFF*
   td::td_api::downcast_call(*m_AuthorizationState, overloaded(
@@ -2510,7 +2513,7 @@ void TgChat::Impl::OnAuthStateUpdate()
       if (!m_IsReinit)
       {
         m_IsReinit = true;
-        SetProtocolUiControl(true);
+        if (!SetProtocolUiControl(true)) return;
         std::cout << "Telegram reauthentication for " << GetProfilePhoneNumber() << " required\n\n";
       }
     }
@@ -2568,7 +2571,7 @@ void TgChat::Impl::OnAuthStateUpdate()
         if (!m_IsReinit)
         {
           m_IsReinit = true;
-          SetProtocolUiControl(true);
+          if (!SetProtocolUiControl(true)) return;
           std::cout << "Telegram reauthentication for " << phone_number << " required\n\n";
         }
       }
@@ -2633,7 +2636,7 @@ void TgChat::Impl::OnAuthStateUpdate()
     if (!m_IsSetup && !m_IsReinit)
     {
       m_IsReinit = true;
-      SetProtocolUiControl(true);
+      if (!SetProtocolUiControl(true)) return;
       std::cout << "Telegram reauthentication for " << GetProfilePhoneNumber() << " required\n\n";
     }
 
@@ -2777,7 +2780,7 @@ void TgChat::Impl::AuthInputLoop()
 
       case AuthInputSessionClosed:
         {
-          SetProtocolUiControl(true);
+          if (!SetProtocolUiControl(true)) return;
           std::cout << "\n";
           std::cout << "WARNING: Session terminated by other device.\n";
           std::cout << "Please restart nchat to reauthenticate. Press ENTER to continue.\n";
@@ -4076,13 +4079,15 @@ std::string TgChat::Impl::ConvertMarkdownV2ToV1(const std::string& p_Str)
   return rv;
 }
 
-void TgChat::Impl::SetProtocolUiControl(bool p_IsTakeControl)
+bool TgChat::Impl::SetProtocolUiControl(bool p_IsTakeControl)
 {
   LOG_TRACE("set protocol ui control %d", p_IsTakeControl);
   std::shared_ptr<ProtocolUiControlNotify> protocolUiControlNotify =
     std::make_shared<ProtocolUiControlNotify>(m_ProfileId);
   protocolUiControlNotify->isTakeControl = p_IsTakeControl;
   CallMessageHandler(protocolUiControlNotify);
+
+  if (!protocolUiControlNotify->isUiAvailable) { m_AuthUiUnavailable = true; return false; }
 
   // if attempting to take control, but failed to do so, keep retrying
   while (p_IsTakeControl && !protocolUiControlNotify->isTakeControl)
@@ -4091,9 +4096,11 @@ void TgChat::Impl::SetProtocolUiControl(bool p_IsTakeControl)
     LOG_TRACE("set protocol ui control retry");
     protocolUiControlNotify->isTakeControl = p_IsTakeControl;
     CallMessageHandler(protocolUiControlNotify);
+    if (!protocolUiControlNotify->isUiAvailable) { m_AuthUiUnavailable = true; return false; }
   }
 
   TimeUtil::Sleep(0.100); // wait more than GetKey timeout
+  return true;
 }
 
 std::string TgChat::Impl::GetProfilePhoneNumber()

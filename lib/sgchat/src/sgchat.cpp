@@ -746,12 +746,12 @@ std::string SgChat::GetProxyUrl() const
   return "";
 }
 
-void SgChat::SetProtocolUiControl(bool p_IsTakeControl)
+bool SgChat::SetProtocolUiControl(bool p_IsTakeControl)
 {
   if (m_IsSetup)
   {
     LOG_TRACE("set protocol ui control %d ignored during setup", p_IsTakeControl);
-    return;
+    return true;
   }
 
   LOG_TRACE("set protocol ui control %d", p_IsTakeControl);
@@ -760,6 +760,8 @@ void SgChat::SetProtocolUiControl(bool p_IsTakeControl)
   protocolUiControlNotify->isTakeControl = p_IsTakeControl;
   CallMessageHandler(protocolUiControlNotify);
 
+  if (!protocolUiControlNotify->isUiAvailable) return false;
+
   // if attempting to take control, but failed to do so, keep retrying
   while (p_IsTakeControl && !protocolUiControlNotify->isTakeControl)
   {
@@ -767,9 +769,11 @@ void SgChat::SetProtocolUiControl(bool p_IsTakeControl)
     LOG_TRACE("set protocol ui control retry");
     protocolUiControlNotify->isTakeControl = p_IsTakeControl;
     CallMessageHandler(protocolUiControlNotify);
+    if (!protocolUiControlNotify->isUiAvailable) return false;
   }
 
   TimeUtil::Sleep(0.100); // wait more than GetKey timeout
+  return true;
 }
 
 void SgChat::SetStatus(int p_Flags)
@@ -1376,13 +1380,14 @@ void SgReinit(int p_ConnId)
   }
 }
 
-void SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl)
+int SgSetProtocolUiControl(int p_ConnId, int p_IsTakeControl)
 {
   SgChat* instance = SgChat::GetInstance(p_ConnId);
   if (instance != nullptr)
   {
-    instance->SetProtocolUiControl(p_IsTakeControl == 1);
+    return instance->SetProtocolUiControl(p_IsTakeControl == 1) ? 1 : 0;
   }
+  return 0;
 }
 
 void SgSetStatus(int p_ConnId, int p_Flags)
